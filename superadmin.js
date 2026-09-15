@@ -380,21 +380,21 @@ function renderViajes(viajes) {
         
         // Tarjeta viaje
         const btnInscripcion = v.inscripcion_abierta 
-            ? `<button class="btn btn-outline" style="border-color:var(--error); color:var(--error); width:auto; padding:5px 10px;" onclick="toggleInscripcion('${v.id}', false)">Cerrar Inscripción</button>`
-            : `<button class="btn btn-success" style="width:auto; padding:5px 10px;" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
+            ? `<button class="btn btn-outline error btn-auto" onclick="toggleInscripcion('${v.id}', false)">Cerrar Inscripción</button>`
+            : `<button class="btn btn-success btn-auto" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
 
-        const btnCroquis = `<button class="btn" style="width:auto; padding:5px 10px; margin-left:10px;" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
-        const btnEdit = `<button class="btn btn-outline" style="padding:5px 10px; margin-left:10px;" onclick="editarViaje('${v.id}')">Editar</button>`;
-        const btnDelete = `<button class="btn" style="background:var(--error); border-color:var(--error); padding:5px 10px; margin-left:10px;" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
+        const btnCroquis = `<button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
+        const btnEdit = `<button class="btn btn-outline btn-auto" onclick="editarViaje('${v.id}')">Editar</button>`;
+        const btnDelete = `<button class="btn btn-danger btn-auto" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
 
         container.innerHTML += `
             <div class="trip-item">
                 <div class="trip-info">
                     <h4>${v.titulo}</h4>
                     <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
-                    <p>Inscripción: <strong>${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</strong></p>
+                    <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
                 </div>
-                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:5px;">
+                <div class="btn-group">
                     ${btnInscripcion}
                     ${btnCroquis}
                     ${btnEdit}

@@ -86,8 +86,8 @@ async function cargarManifiesto() {
                 <td>${p.codigo_pasajero || '-'}</td>
                 <td>Parada...</td>
                 <td>${p.asiento || '-'}</td>
-                <td id="status-${p.id}"><span class="badge" style="background:#fee2e2; color:#ef4444;">Falta</span></td>
-                <td><button class="btn btn-success" style="padding: 4px 10px; font-size:0.8rem;" onclick="marcarAbordo(this, '${p.id}')">Marcar A bordo</button></td>
+                <td id="status-${p.id}"><span class="badge" style="background:var(--error-light); color:var(--error);">Falta</span></td>
+                <td><button class="btn btn-success btn-auto" onclick="marcarAbordo(this, '${p.id}')">Marcar A bordo</button></td>
             </tr>
         `;
     });
@@ -100,7 +100,7 @@ function marcarAbordo(btn, id) {
     btn.classList.add('btn-outline');
     btn.innerText = "Confirmado";
     btn.disabled = true;
-    document.getElementById(`status-${id}`).innerHTML = '<span class="badge" style="background:#d1fae5; color:#059669;">A bordo</span>';
+    document.getElementById(`status-${id}`).innerHTML = '<span class="badge" style="background:var(--success-light); color:var(--success);">A bordo</span>';
 }
 
 // ====== LÓGICA DE VIAJE ======
