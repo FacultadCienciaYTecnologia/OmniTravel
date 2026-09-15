@@ -16,7 +16,7 @@ function logout() {
 
 // ====== MAPA ESTUDIANTE ======
 const map = L.map('student-map').setView([13.6929, -89.2182], 13);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 let polylineRuta = null;
 let busMarker = null;
 
@@ -110,10 +110,32 @@ async function loadEstudianteDashboard() {
 
         // Cargar Ruta en el Mapa
         if (viaje.ruta && viaje.ruta.length > 0) {
-            const latlngs = viaje.ruta.map(r => [r.lat, r.lng]);
-            if(polylineRuta) map.removeLayer(polylineRuta);
-            polylineRuta = L.polyline(latlngs, {color: 'var(--accent)', weight: 5}).addTo(map);
-            map.fitBounds(polylineRuta.getBounds());
+            if(polylineRuta) {
+                if(polylineRuta.getWaypoints) map.removeControl(polylineRuta);
+                else map.removeLayer(polylineRuta);
+            }
+
+            const waypoints = viaje.ruta.map(r => L.latLng(r.lat, r.lng));
+            polylineRuta = L.Routing.control({
+                waypoints: waypoints,
+                routeWhileDragging: false,
+                addWaypoints: false,
+                draggableWaypoints: false,
+                fitSelectedRoutes: true,
+                show: false, // Ocultar panel de texto
+                createMarker: function(i, wp, nWps) {
+                    const nombre = viaje.ruta[i]?.nombre || `Parada ${i+1}`;
+                    return L.marker(wp.latLng).bindPopup(`<b>${nombre}</b>`);
+                }
+            }).addTo(map);
+
+            polylineRuta.on('routingerror', function(e) {
+                console.warn('OSRM rate limit. Dibujando línea recta.');
+                map.removeControl(polylineRuta);
+                const latlngs = viaje.ruta.map(r => [r.lat, r.lng]);
+                polylineRuta = L.polyline(latlngs, {color: 'var(--accent)', weight: 5}).addTo(map);
+                map.fitBounds(polylineRuta.getBounds());
+            });
             
             // Llenar paradas
             const selectParadas = document.getElementById('parada-select');
@@ -122,9 +144,46 @@ async function loadEstudianteDashboard() {
                 viaje.ruta.forEach((r, i) => {
                     const nombre = r.nombre || `Parada ${i+1}`;
                     selectParadas.innerHTML += `<option value='{"lat":${r.lat}, "lng":${r.lng}}'>${nombre}</option>`;
-                    L.marker([r.lat, r.lng]).addTo(map).bindPopup(nombre);
                 });
             }
+
+            // Lógica de parada intermitente (punto a segmento)
+            map.off('click');
+            map.on('click', async function(e) {
+                if (!polylineRuta || !polylineRuta._selectedRoute) return;
+                
+                const routeCoords = polylineRuta._selectedRoute.coordinates; 
+                if (!routeCoords) return;
+
+                let minDistance = Infinity;
+                routeCoords.forEach(coord => {
+                    const d = map.distance(e.latlng, coord);
+                    if(d < minDistance) minDistance = d;
+                });
+
+                // 30 metros de tolerancia en la carretera
+                if (minDistance <= 30) {
+                    const { isConfirmed } = await Swal.fire({
+                        title: 'Parada Intermitente',
+                        text: 'Has seleccionado un punto en la ruta. ¿Deseas solicitar subirte aquí?',
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: 'Sí, guardar parada'
+                    });
+
+                    if (isConfirmed) {
+                        if(window.markerIntermitente) map.removeLayer(window.markerIntermitente);
+                        window.markerIntermitente = L.marker(e.latlng, { icon: L.divIcon({className: 'custom-div-icon', html: "<div style='background:#fde047; width:15px; height:15px; border-radius:50%; border:2px solid #b45309;'></div>"}) }).addTo(map).bindPopup("Tu parada intermitente").openPopup();
+                        
+                        const select = document.getElementById('parada-select');
+                        const val = JSON.stringify({lat: e.latlng.lat, lng: e.latlng.lng});
+                        select.innerHTML += `<option value='${val}' selected>Parada Intermitente Solicitada</option>`;
+                        Swal.fire('Parada Seleccionada', 'Recuerda dar clic en "Confirmar Parada".', 'success');
+                    }
+                } else {
+                    Swal.fire('Fuera de Ruta', 'Debes hacer clic directamente en la línea azul por donde pasará el transporte.', 'warning');
+                }
+            });
         }
 
         // Obtener info del transporte si lo tiene

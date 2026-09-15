@@ -256,13 +256,29 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(globalMa
 const routingMap = L.map('routing-map').setView([13.6929, -89.2182], 12);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(routingMap);
 
-let marcadoresRuta = [];
-let polylineRutaAdmin = null;
+let routeControl = L.Routing.control({
+    waypoints: [],
+    routeWhileDragging: true,
+    language: 'es',
+    show: false, // Ocultar el panel de instrucciones texto
+    createMarker: function(i, wp, nWps) {
+        const nombre = (wp.options && wp.options.nombre) ? wp.options.nombre : `Parada ${i+1}`;
+        const tiempo = (wp.options && wp.options.tiempo) ? `<br>Hora est.: ${wp.options.tiempo}` : '';
+        return L.marker(wp.latLng, { draggable: true }).bindPopup(`<b>${nombre}</b>${tiempo}`);
+    }
+}).addTo(routingMap);
+
+// En caso de error de OSRM (ej. 429), ocultar el error visual pero mantener la ruta (solo que recta)
+routeControl.on('routingerror', function(e) {
+    console.warn('Error de enrutamiento OSRM (límite alcanzado). Dibujando línea recta en su lugar.', e);
+});
 
 // Click en el mapa para añadir paradas a la ruta
 routingMap.on('click', async function(e) {
+    const currentWaypoints = routeControl.getWaypoints().filter(w => w.latLng); // Filtrar nulos
+    
     const { value: formValues } = await Swal.fire({
-        title: `Detalles de Parada ${marcadoresRuta.length + 1}`,
+        title: `Detalles de Parada ${currentWaypoints.length + 1}`,
         html:
             '<input id="swal-p-nombre" class="swal2-input" placeholder="Nombre (Ej. Metrocentro)" style="width:80% !important;">' +
             '<input id="swal-p-tiempo" type="time" class="swal2-input" style="width:80% !important;">',
@@ -278,33 +294,15 @@ routingMap.on('click', async function(e) {
     });
 
     if (formValues) {
-        const wp = {
-            latLng: e.latlng,
-            nombre: formValues.nombre || `Parada ${marcadoresRuta.length + 1}`,
-            tiempo: formValues.tiempo || ''
+        const wp = L.Routing.waypoint(e.latlng);
+        wp.options = { 
+            nombre: formValues.nombre || `Parada ${currentWaypoints.length + 1}`, 
+            tiempo: formValues.tiempo || '' 
         };
-        
-        const tiempoStr = wp.tiempo ? `<br>Hora est.: ${wp.tiempo}` : '';
-        const marker = L.marker(e.latlng, { draggable: true }).bindPopup(`<b>${wp.nombre}</b>${tiempoStr}`).addTo(routingMap);
-        
-        marker.on('dragend', function(event) {
-            wp.latLng = event.target.getLatLng();
-            dibujarRutaAdmin();
-        });
-
-        wp.marker = marker;
-        marcadoresRuta.push(wp);
-        dibujarRutaAdmin();
+        currentWaypoints.push(wp);
+        routeControl.setWaypoints(currentWaypoints);
     }
 });
-
-function dibujarRutaAdmin() {
-    if(polylineRutaAdmin) routingMap.removeLayer(polylineRutaAdmin);
-    if(marcadoresRuta.length > 1) {
-        const latlngs = marcadoresRuta.map(m => m.latLng);
-        polylineRutaAdmin = L.polyline(latlngs, {color: 'var(--accent)', weight: 5}).addTo(routingMap);
-    }
-}
 
 // Guardar Viaje con su ruta
 document.getElementById('btn-save-viaje').addEventListener('click', async () => {
@@ -315,13 +313,14 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
     
     if(!titulo || !fecha || !inicio_asientos || !cierre_asientos) return Swal.fire('Error', 'Completa todos los campos de fechas y nombres.', 'warning');
     
-    if(marcadoresRuta.length < 2) return Swal.fire('Error', 'Debes hacer clic en el mapa al menos dos veces (Origen y Destino).', 'warning');
+    const waypoints = routeControl.getWaypoints().filter(w => w.latLng);
+    if(waypoints.length < 2) return Swal.fire('Error', 'Debes hacer clic en el mapa al menos dos veces (Origen y Destino).', 'warning');
     
-    const waypointsJSON = marcadoresRuta.map(w => ({ 
+    const waypointsJSON = waypoints.map(w => ({ 
         lat: w.latLng.lat, 
         lng: w.latLng.lng,
-        nombre: w.nombre,
-        tiempo: w.tiempo
+        nombre: w.options?.nombre || 'Parada',
+        tiempo: w.options?.tiempo || ''
     }));
 
     const btn = document.getElementById('btn-save-viaje');
@@ -348,9 +347,7 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
         document.getElementById('v-fecha').value = '';
         document.getElementById('v-inicio-asientos').value = '';
         document.getElementById('v-cierre-asientos').value = '';
-        marcadoresRuta.forEach(m => routingMap.removeLayer(m.marker));
-        marcadoresRuta = [];
-        if(polylineRutaAdmin) routingMap.removeLayer(polylineRutaAdmin);
+        routeControl.setWaypoints([]);
         
         loadDashboard(); // Refrescar listas
     } catch(e) {
@@ -387,6 +384,8 @@ function renderViajes(viajes) {
             : `<button class="btn btn-success" style="width:auto; padding:5px 10px;" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
 
         const btnCroquis = `<button class="btn" style="width:auto; padding:5px 10px; margin-left:10px;" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
+        const btnEdit = `<button class="btn btn-outline" style="padding:5px 10px; margin-left:10px;" onclick="editarViaje('${v.id}')">Editar</button>`;
+        const btnDelete = `<button class="btn" style="background:var(--error); border-color:var(--error); padding:5px 10px; margin-left:10px;" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
 
         container.innerHTML += `
             <div class="trip-item">
@@ -395,9 +394,11 @@ function renderViajes(viajes) {
                     <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
                     <p>Inscripción: <strong>${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</strong></p>
                 </div>
-                <div style="display:flex; align-items:center;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:5px;">
                     ${btnInscripcion}
                     ${btnCroquis}
+                    ${btnEdit}
+                    ${btnDelete}
                 </div>
             </div>
         `;
@@ -409,6 +410,71 @@ async function toggleInscripcion(id, estado) {
         await window.db.from('viajes').update({ inscripcion_abierta: estado }).eq('id', id);
         loadDashboard();
     } catch(e) { Swal.fire('Error', 'Fallo al cambiar estado.', 'error'); }
+}
+
+async function editarViaje(id) {
+    const { data: viaje } = await window.db.from('viajes').select('*').eq('id', id).single();
+    if(!viaje) return;
+
+    const { value: formValues } = await Swal.fire({
+        title: 'Editar Viaje',
+        html:
+            `<input id="swal-v-titulo" class="swal2-input" placeholder="Título" value="${viaje.titulo}">` +
+            `<input id="swal-v-fecha" type="datetime-local" class="swal2-input" value="${viaje.fecha_salida.slice(0,16)}">` +
+            `<label style="display:block; margin-top:10px; font-size:14px;">Inicio Selección Asientos:</label>` +
+            `<input id="swal-v-inicio" type="datetime-local" class="swal2-input" value="${viaje.inicio_asientos.slice(0,16)}">` +
+            `<label style="display:block; margin-top:10px; font-size:14px;">Cierre Selección Asientos:</label>` +
+            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar Cambios',
+        preConfirm: () => {
+            return {
+                titulo: document.getElementById('swal-v-titulo').value,
+                fecha_salida: document.getElementById('swal-v-fecha').value,
+                inicio_asientos: document.getElementById('swal-v-inicio').value,
+                cierre_asientos: document.getElementById('swal-v-cierre').value
+            }
+        }
+    });
+
+    if (formValues) {
+        try {
+            await window.db.from('viajes').update(formValues).eq('id', id);
+            Swal.fire('Guardado', 'El viaje ha sido actualizado.', 'success');
+            loadDashboard();
+        } catch(e) { Swal.fire('Error', 'No se pudo actualizar.', 'error'); }
+    }
+}
+
+async function eliminarViaje(id) {
+    const res = await Swal.fire({
+        title: '¿Estás seguro?',
+        text: "Esta acción borrará el viaje, los transportes, y desasignará a todos los pasajeros inscritos.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'Sí, eliminar todo'
+    });
+
+    if(res.isConfirmed) {
+        try {
+            // 1. Liberar a los usuarios (poner viaje_id y transporte_id en null)
+            await window.db.from('usuarios').update({ viaje_id: null, transporte_id: null, estado_viaje: 'ninguno', asiento: null }).eq('viaje_id', id);
+            
+            // 2. Eliminar transportes asociados (Supabase debería hacerlo si hay cascada, pero lo hacemos manual por si acaso)
+            await window.db.from('transportes').delete().eq('viaje_id', id);
+
+            // 3. Eliminar el viaje
+            await window.db.from('viajes').delete().eq('id', id);
+            
+            Swal.fire('Eliminado', 'El viaje ha sido borrado.', 'success');
+            loadDashboard();
+        } catch(e) { 
+            console.error(e);
+            Swal.fire('Error', 'No se pudo eliminar completamente.', 'error'); 
+        }
+    }
 }
 
 // ====== TOPOLOGÍAS ======

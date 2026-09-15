@@ -16,7 +16,7 @@ function logout() {
 
 // ====== MAPA ADMIN ======
 const map = L.map('admin-map').setView([13.6929, -89.2182], 14);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 let marker = null;
 let watchId = null;
@@ -38,8 +38,14 @@ async function loadAdminDashboard() {
         viajeIdActual = viajes[0].id;
         document.getElementById('estado-ruta').innerText = viajes[0].estado === 'en_ruta' ? 'Ruta en Progreso' : 'Preparación';
 
-        const { data: transportes } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeIdActual).limit(1);
-        if(transportes && transportes.length > 0) transporteIdActual = transportes[0].id;
+        // Obtener datos actualizados del admin para saber su transporte asignado
+        const { data: adminUser } = await window.db.from('usuarios').select('transporte_id').eq('id', session.id).single();
+        if(adminUser && adminUser.transporte_id) {
+            transporteIdActual = adminUser.transporte_id;
+        } else {
+            Swal.fire('Atención', 'No has sido asignado a ningún vehículo por el Superadmin.', 'warning');
+            return;
+        }
 
         cargarManifiesto();
         cargarAnotadosYVehiculos(); // Cargar asignaciones manuales
@@ -193,23 +199,25 @@ async function cargarAnotadosYVehiculos() {
     }
     
     try {
-        const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeIdActual);
+        const { data: transporteAdmin } = await window.db.from('transportes').select('tipo').eq('id', transporteIdActual).single();
         
-        if(!transportes || transportes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--error);">Este viaje aún no tiene vehículos asignados.</td></tr>';
+        if(!transporteAdmin) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--error);">No estás asignado a un vehículo válido.</td></tr>';
             return;
         }
 
-        let opcionesTransporte = '<option value="" disabled selected>Asignar a...</option>';
-        transportes.forEach((t, i) => {
-            const tipoNom = t.tipo === 'bus_50' ? 'Autobús (50)' : (t.tipo === 'microbus_15' ? 'Microbús (15)' : 'Moto');
-            opcionesTransporte += `<option value="${t.id}">Vehículo ${i+1}: ${tipoNom}</option>`;
-        });
+        const tipoNom = transporteAdmin.tipo === 'bus_50' ? 'Autobús (50)' : (transporteAdmin.tipo === 'microbus_15' ? 'Microbús (15)' : 'Moto');
+        const opcionesTransporte = `<option value="" disabled selected>Asignar a...</option><option value="${transporteIdActual}">Mi Vehículo: ${tipoNom}</option>`;
 
-        const { data: usuarios } = await window.db.from('usuarios').select('*').eq('viaje_id', viajeIdActual).in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
+        // Traer usuarios anotados o asignados (excluir admins)
+        const { data: usuarios } = await window.db.from('usuarios')
+            .select('*')
+            .eq('viaje_id', viajeIdActual)
+            .neq('rol', 'admin') // ¡Los admins no pueden ser asignados por otros admins!
+            .in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
         
         if(!usuarios || usuarios.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay pasajeros anotados para este viaje.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay estudiantes anotados para este viaje.</td></tr>';
             return;
         }
 
@@ -219,8 +227,12 @@ async function cargarAnotadosYVehiculos() {
             
             let userSelect = opcionesTransporte;
             if(u.transporte_id) {
-                userSelect = userSelect.replace(`value="${u.transporte_id}"`, `value="${u.transporte_id}" selected`);
-                userSelect = userSelect.replace('selected>Asignar', '>Asignar');
+                if(u.transporte_id === transporteIdActual) {
+                    userSelect = userSelect.replace(`value="${u.transporte_id}"`, `value="${u.transporte_id}" selected`);
+                    userSelect = userSelect.replace('selected>Asignar', '>Asignar');
+                } else {
+                    userSelect = `<option disabled selected>En otro vehículo</option>`;
+                }
             }
             
             const badge = (u.estado_viaje === 'asignado' || u.estado_viaje === 'asiento_elegido') ? '<span style="color:var(--success); font-size:12px; margin-left:5px;">✓ Asignado</span>' : '';
