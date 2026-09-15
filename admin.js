@@ -43,7 +43,12 @@ async function loadAdminDashboard() {
         if(adminUser && adminUser.transporte_id) {
             transporteIdActual = adminUser.transporte_id;
         } else {
-            Swal.fire('Atención', 'No has sido asignado a ningún vehículo por el Superadmin.', 'warning');
+            Swal.fire('Atención', 'No has sido asignado a ningún vehículo por el Superadmin. No puedes gestionar pasajeros ni el viaje.', 'warning');
+            const tbodyAsignacion = document.getElementById('table-asignacion-body');
+            const tbodyManifiesto = document.getElementById('manifest-tbody');
+            if(tbodyAsignacion) tbodyAsignacion.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--warning);">No estás asignado a un vehículo.</td></tr>';
+            if(tbodyManifiesto) tbodyManifiesto.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--warning);">No estás asignado a un vehículo.</td></tr>';
+            document.getElementById('count-abordo').innerText = `A bordo: 0 / 0`;
             return;
         }
 
