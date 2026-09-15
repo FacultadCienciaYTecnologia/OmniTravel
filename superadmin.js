@@ -386,6 +386,7 @@ function renderViajes(viajes) {
         const btnCroquis = `<button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
         const btnEdit = `<button class="btn btn-outline btn-auto" onclick="editarViaje('${v.id}')">Editar</button>`;
         const btnDelete = `<button class="btn btn-danger btn-auto" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
+        const btnRestart = v.estado === 'finalizado' ? `<button class="btn btn-warning btn-auto" style="background:#eab308; border-color:#ca8a04; color:#fff;" onclick="reiniciarViaje('${v.id}')">Reiniciar</button>` : '';
 
         container.innerHTML += `
             <div class="trip-item">
@@ -393,8 +394,10 @@ function renderViajes(viajes) {
                     <h4>${v.titulo}</h4>
                     <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
                     <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
+                    <p>Estado: <b>${v.estado.toUpperCase()}</b></p>
                 </div>
                 <div class="btn-group">
+                    ${btnRestart}
                     ${btnInscripcion}
                     ${btnCroquis}
                     ${btnEdit}
@@ -445,6 +448,24 @@ async function editarViaje(id) {
             loadDashboard();
         } catch(e) { Swal.fire('Error', 'No se pudo actualizar.', 'error'); }
     }
+}
+
+async function reiniciarViaje(id) {
+    Swal.fire({
+        title: '¿Reiniciar Viaje?',
+        text: "Esto volverá a poner el viaje en estado de 'Preparación' para que el chofer lo vuelva a ver y se reabrirán las inscripciones.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, reiniciar'
+    }).then(async (res) => {
+        if(res.isConfirmed) {
+            try {
+                await window.db.from('viajes').update({ estado: 'preparacion', inscripcion_abierta: true }).eq('id', id);
+                Swal.fire('Reiniciado', 'El viaje está activo de nuevo.', 'success');
+                loadDashboard();
+            } catch(e) { Swal.fire('Error', 'No se pudo reiniciar el viaje.', 'error'); }
+        }
+    });
 }
 
 async function eliminarViaje(id) {
@@ -793,10 +814,14 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                     session.asiento = numero.toString();
                     localStorage.setItem('omni_user', JSON.stringify(session));
-                    Swal.fire('¡Éxito!', 'Asiento VIP cambiado.', 'success');
+                    Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                     lastAdminOccupiedStr = "";
                     renderAdminCroquis();
-                } catch(e) {}
+                } catch(e) {
+                    Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                    lastAdminOccupiedStr = "";
+                    renderAdminCroquis();
+                }
             }
         });
         return;

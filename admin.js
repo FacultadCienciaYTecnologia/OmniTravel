@@ -36,6 +36,7 @@ async function loadAdminDashboard() {
         }
 
         viajeIdActual = viajes[0].id;
+        window.rutaActual = viajes[0].ruta || [];
         document.getElementById('estado-ruta').innerText = viajes[0].estado === 'en_ruta' ? 'Ruta en Progreso' : 'Preparación';
 
         // Obtener datos actualizados del admin para saber su transporte asignado
@@ -112,15 +113,38 @@ function marcarAbordo(btn, id) {
 // ====== LÓGICA DE VIAJE ======
 async function iniciarRuta() {
     if(!viajeIdActual) return;
-    try {
-        await window.db.from('viajes').update({ estado: 'en_ruta' }).eq('id', viajeIdActual);
-        document.getElementById('gps-toggle').checked = true;
-        activarGPS();
-        document.getElementById('btn-iniciar').style.display = 'none';
-        document.getElementById('btn-finalizar').style.display = 'inline-block';
-        document.getElementById('estado-ruta').innerText = 'Ruta en Progreso';
-        Swal.fire('Ruta Iniciada', 'El GPS ahora transmite en tiempo real.', 'success');
-    } catch(e) { console.error(e); }
+    if(!window.rutaActual || window.rutaActual.length === 0) {
+        return Swal.fire('Error', 'El viaje no tiene una ruta definida.', 'error');
+    }
+
+    if (!navigator.geolocation) return Swal.fire('Error', 'Navegador no soporta GPS', 'error');
+
+    Swal.fire({ title: 'Verificando ubicación...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        
+        const origen = window.rutaActual[0];
+        const dist = map.distance([lat, lng], [origen.lat, origen.lng]);
+
+        if (dist > 25) { // 25 metros de margen de error GPS
+            Swal.fire('Lejos del Origen', `Debes estar en el punto de inicio para comenzar. Estás a ${Math.round(dist)} metros.`, 'warning');
+            return;
+        }
+
+        try {
+            await window.db.from('viajes').update({ estado: 'en_ruta' }).eq('id', viajeIdActual);
+            document.getElementById('gps-toggle').checked = true;
+            activarGPS();
+            document.getElementById('btn-iniciar').style.display = 'none';
+            document.getElementById('btn-finalizar').style.display = 'inline-block';
+            document.getElementById('estado-ruta').innerText = 'Ruta en Progreso';
+            Swal.fire('Ruta Iniciada', 'El GPS ahora transmite en tiempo real.', 'success');
+        } catch(e) { console.error(e); Swal.fire('Error', 'Fallo al iniciar ruta.', 'error'); }
+    }, (err) => {
+        Swal.fire('Error GPS', 'No se pudo obtener tu ubicación. Verifica permisos.', 'error');
+    }, { enableHighAccuracy: true });
 }
 
 async function finalizarRuta() {
@@ -175,6 +199,18 @@ function activarGPS() {
                     longitud: lng,
                     velocidad: speed
                 }]);
+            }
+            
+            // Verificación de fin de ruta automático
+            if(window.rutaActual && window.rutaActual.length > 0) {
+                const destino = window.rutaActual[window.rutaActual.length - 1];
+                const distDestino = map.distance([lat, lng], [destino.lat, destino.lng]);
+                if (distDestino <= 20 && document.getElementById('btn-finalizar').style.display !== 'none') {
+                    // Prevenir múltiples llamadas quitando el botón
+                    document.getElementById('btn-finalizar').style.display = 'none';
+                    Swal.fire('Destino Alcanzado', 'Has llegado al punto final de la ruta. Finalizando viaje...', 'info');
+                    finalizarRuta();
+                }
             }
         },
         (error) => {
@@ -474,7 +510,11 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                 Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                 lastAdminOccupiedStr = "";
                 renderAdminCroquis();
-            } catch(e) {}
+            } catch(e) {
+                Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                lastAdminOccupiedStr = "";
+                renderAdminCroquis();
+            }
         }
     });
 }

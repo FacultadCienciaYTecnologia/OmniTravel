@@ -92,21 +92,69 @@ async function loadEstudianteDashboard() {
             cargarMiembrosGenerales(viaje.id);
 
             // Validar reloj de asientos
-            const ahora = new Date();
-            const inicio = new Date(viaje.inicio_asientos);
-            const cierre = new Date(viaje.cierre_asientos);
+            const inicio = new Date(viaje.inicio_asientos).getTime();
+            const cierre = new Date(viaje.cierre_asientos).getTime();
+            const timerDiv = document.getElementById('seat-timer-container');
+            const croquisDiv = document.getElementById('croquis');
             
-            if (ahora < inicio) {
-                document.getElementById('croquis').innerHTML = `<p class="text-muted text-center" style="margin:20px;">La selección de asientos se habilitará el <b>${inicio.toLocaleString()}</b></p>`;
-            } else if (ahora > cierre && estado !== 'asiento_elegido') {
-                document.getElementById('croquis').innerHTML = `<p style="color:var(--error);" class="text-center" style="margin:20px;">El periodo de selección cerró el <b>${cierre.toLocaleString()}</b>.</p>`;
-            } else {
-                renderCroquisEstudiante(viaje.id, session.transporte_id);
-                if (!croquisInterval) {
-                    croquisInterval = setInterval(() => renderCroquisEstudiante(viaje.id, session.transporte_id), 2500); // Polling silencioso 2.5s
+            if(window.seatTimerInterval) clearInterval(window.seatTimerInterval);
+            
+            function updateSeatTimer() {
+                const now = new Date().getTime();
+                
+                if (now < inicio) {
+                    const diff = inicio - now;
+                    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+                    
+                    timerDiv.style.display = 'block';
+                    timerDiv.style.background = '#e0f2fe';
+                    timerDiv.style.color = '#0369a1';
+                    timerDiv.innerHTML = `La selección de asientos se abrirá en:<br>${d}d ${h}h ${m}m ${s}s`;
+                    
+                    croquisDiv.innerHTML = `<div class="text-center text-muted" style="margin:20px;">Esperando apertura del croquis...</div>`;
+                    if(croquisInterval) { clearInterval(croquisInterval); croquisInterval = null; }
+                } 
+                else if (now >= inicio && now <= cierre) {
+                    const diff = cierre - now;
+                    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+                    
+                    timerDiv.style.display = 'block';
+                    timerDiv.style.background = '#dcfce7';
+                    timerDiv.style.color = '#15803d';
+                    timerDiv.innerHTML = `¡Selección Abierta! Cierra en: ${d > 0 ? d+'d ' : ''}${h}h ${m}m ${s}s`;
+                    
+                    if(!croquisInterval) {
+                        renderCroquisEstudiante(viaje.id, session.transporte_id);
+                        croquisInterval = setInterval(() => renderCroquisEstudiante(viaje.id, session.transporte_id), 2500);
+                    }
+                } 
+                else {
+                    timerDiv.style.display = 'block';
+                    timerDiv.style.background = '#fee2e2';
+                    timerDiv.style.color = '#b91c1c';
+                    timerDiv.innerHTML = `El periodo de selección ha finalizado.`;
+                    
+                    if(estado !== 'asiento_elegido') {
+                        croquisDiv.innerHTML = `<p class="text-center" style="margin:20px;">Ya no puedes seleccionar asiento.</p>`;
+                        if(croquisInterval) { clearInterval(croquisInterval); croquisInterval = null; }
+                    } else {
+                        // Ya eligió, mostrar croquis de solo lectura
+                        if(!croquisInterval) {
+                            renderCroquisEstudiante(viaje.id, session.transporte_id);
+                            croquisInterval = setInterval(() => renderCroquisEstudiante(viaje.id, session.transporte_id), 5000);
+                        }
+                    }
                 }
             }
-        }
+            
+            updateSeatTimer();
+            window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
 
         // Cargar Ruta en el Mapa
         if (viaje.ruta && viaje.ruta.length > 0) {
@@ -427,7 +475,11 @@ function selectSeat(seatElement, numero) {
                     Swal.fire('¡Éxito!', 'Asiento cambiado.', 'success');
                     lastOccupiedStr = ""; // Forzar recargo
                     loadEstudianteDashboard();
-                } catch(e) {}
+                } catch(e) {
+                    Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                    lastOccupiedStr = ""; 
+                    loadEstudianteDashboard();
+                }
             }
         });
         return;
@@ -454,7 +506,11 @@ function selectSeat(seatElement, numero) {
                 Swal.fire('¡Éxito!', 'Tu asiento ha sido reservado.', 'success');
                 lastOccupiedStr = ""; // Forzar recargo
                 loadEstudianteDashboard();
-            } catch(e) { Swal.fire('Error', 'No se pudo guardar.', 'error'); }
+            } catch(e) { 
+                Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error'); 
+                lastOccupiedStr = ""; 
+                loadEstudianteDashboard();
+            }
         }
     });
 }
