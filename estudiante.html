@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OmniTravel - Panel Estudiante</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <style>
+        .navbar { position: static; margin-bottom: 2rem; }
+        
+        .trip-header {
+            background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+            color: white;
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow-md);
+        }
+        .trip-header h2 { color: white; margin-bottom: 5px; }
+        .trip-header p { color: rgba(255,255,255,0.8); }
+        
+        #student-map {
+            width: 100%;
+            height: 350px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--card-border);
+            z-index: 1;
+        }
+
+        /* --- CROQUIS DE ASIENTOS --- */
+        .bus-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            background: #f1f5f9;
+            padding: 2rem;
+            border-radius: var(--radius-md);
+            max-width: 300px;
+            margin: 0 auto;
+            border: 2px solid #e2e8f0;
+        }
+        
+        /* === DISEÑO DE BUS HORIZONTAL === */
+        .bus-horizontal {
+            display: flex;
+            flex-direction: row-reverse; /* Frente a la derecha */
+            align-items: center;
+            gap: 15px;
+            background: #e2e8f0;
+            padding: 20px 30px;
+            border-radius: 50px 100px 100px 50px; /* Forma aerodinámica del bus */
+            border: 6px solid #94a3b8;
+            overflow-x: auto;
+            max-width: 100%;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        .bus-front {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 180px;
+            padding-left: 20px;
+            border-left: 2px dashed #cbd5e1;
+        }
+
+        .steering-wheel {
+            width: 45px; height: 45px; 
+            border-radius: 50%; 
+            border: 6px solid #475569;
+            background: #cbd5e1;
+            position: relative;
+        }
+        .steering-wheel::after {
+            content: ''; position: absolute; top:50%; left:0; right:0; height:4px; background:#475569; transform: translateY(-50%);
+        }
+
+        .bus-column {
+            display: flex;
+            flex-direction: column;
+            gap: 40px; /* Pasillo central */
+        }
+        
+        .seat-pair { 
+            display: flex; 
+            flex-direction: column; /* Asientos apilados verticalmente */
+            gap: 5px; 
+        }
+
+        /* Diseño hiper-realista del asiento visto desde arriba */
+        .seat {
+            width: 45px; height: 40px; 
+            background: #38bdf8; 
+            border: 2px solid #0284c7;
+            border-radius: 5px 12px 12px 5px; /* Curvo adelante, recto atrás */
+            position: relative; 
+            cursor: pointer; transition: var(--transition);
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 0.85rem; font-weight: 800; color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: inset 4px 0 0 rgba(0,0,0,0.15); /* Sombra en el respaldo */
+        }
+        
+        /* Reposacabezas */
+        .seat::before {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: 4px;
+            bottom: 4px;
+            width: 12px;
+            background: #0284c7;
+            border-radius: 3px;
+            z-index: 0;
+        }
+        
+        .seat span { position: relative; z-index: 1; margin-left: 8px; } /* Mover el número un poco adelante */
+        
+        .seat:hover:not(.occupied):not(.selected) { background: #7dd3fc; border-color: #0369a1; transform: translateY(-2px); }
+        .seat.occupied { background: #f87171; border-color: #b91c1c; cursor: not-allowed; }
+        .seat.occupied::before { background: #b91c1c; }
+        
+        .seat.selected { background: var(--success); border-color: #047857; }
+        .seat.selected::before { background: #047857; }
+
+        .legend { display: flex; justify-content: center; gap: 15px; margin-top: 15px; font-size: 0.85rem; }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-box { width: 15px; height: 15px; border-radius: 3px; border: 1px solid #cbd5e1;}
+    </style>
+</head>
+<body>
+
+    <nav class="navbar">
+        <a href="#" class="nav-brand">OmniTravel Estudiante</a>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="user-badge" id="user-name-display">Hola, Estudiante</span>
+            <img id="nav-profile-pic" src="" alt="Perfil" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); background: #fff;">
+            <button class="btn btn-outline" style="padding: 0.4rem 1rem; width: auto;" onclick="logout()">Salir</button>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 0;">
+        
+        <div class="trip-header">
+            <div>
+                <h2 id="v-titulo">Cargando...</h2>
+                <p id="v-fecha">Buscando viaje programado...</p>
+                <p><strong id="v-transporte"></strong></p>
+                <p id="v-countdown" style="font-weight:bold; font-size: 1.1rem; margin-top:10px; color:#fde047;"></p>
+            </div>
+            <div>
+                <span class="badge" id="badge-estado" style="background: rgba(255,255,255,0.2); color:white; font-size:1rem; padding: 8px 15px;">Inscripciones Cerradas</span>
+            </div>
+        </div>
+
+        <div id="panel-anotarse" class="card text-center mb-3" style="display:none;">
+            <h3 class="mb-2">¡Inscripciones Abiertas!</h3>
+            <p class="text-muted mb-3">Hay un nuevo viaje programado. Regístrate para que el administrador te asigne un vehículo.</p>
+            <button class="btn btn-success" style="width: auto;" onclick="anotarseViaje()">Quiero ir a este Viaje</button>
+        </div>
+
+        <div id="panel-espera" class="card text-center mb-3" style="display:none; background: #fffbeb; border-color: #fde68a;">
+            <h3 class="mb-2" style="color:#b45309;">Estado: Esperando Asignación</h3>
+            <p style="color:#92400e;" id="espera-texto">Estás anotado. Espera a que el administrador asigne los transportes.</p>
+        </div>
+
+        <div id="panel-croquis" style="display:none;">
+            <div class="card mb-3">
+                <h3 class="mb-2">Directorio del Vehículo</h3>
+                <p class="text-muted mb-2">Miembros asignados a tu mismo transporte.</p>
+                <div id="lista-miembros" style="display: flex; gap:10px; flex-wrap: wrap;">
+                    <!-- Burbujas de fotos -->
+                </div>
+            </div>
+
+            <!-- LISTA GENERAL DEL VIAJE -->
+            <div class="card mb-3">
+                <h3 class="mb-2">Participantes del Viaje (General)</h3>
+                <p class="text-muted mb-2">Todos los anotados al viaje.</p>
+                <div id="lista-general" style="display: flex; gap:10px; flex-wrap: wrap;">
+                    <!-- Burbujas de fotos -->
+                </div>
+            </div>
+
+            <div class="grid grid-2 mb-3">
+                <!-- SELECCIÓN DE PARADA -->
+                <div class="card">
+                    <h3 class="mb-2">1. Selecciona tu Parada</h3>
+                    <p class="text-muted mb-3">Elige dónde abordarás.</p>
+                    <form id="form-parada">
+                        <select id="parada-select" required>
+                            <option value="">Seleccione una parada del mapa...</option>
+                        </select>
+                        <button type="button" class="btn mt-2" id="btn-save-parada" onclick="guardarParada()">Confirmar Parada</button>
+                    </form>
+                </div>
+
+                <!-- SELECCIÓN DE ASIENTO -->
+                <div class="card">
+                    <h3 class="mb-2">2. Reserva tu Asiento</h3>
+                    <p class="text-muted mb-3">Selecciona tu lugar en el croquis.</p>
+                    
+                    <div class="bus-container" id="croquis">
+                        <div class="text-center text-muted">Cargando croquis...</div>
+                    </div>
+
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-box" style="background:white;"></div> Libre</div>
+                        <div class="legend-item"><div class="legend-box" style="background:#fee2e2; border-color:#fca5a5;"></div> Ocupado</div>
+                        <div class="legend-item"><div class="legend-box" style="background:var(--success); border-color:#059669;"></div> Tu Asiento</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAPA GPS EN VIVO -->
+        <div class="card mt-3">
+            <h3 class="mb-2">Ruta y GPS en Vivo</h3>
+            <p class="text-muted mb-2">Aquí podrás ver dónde viene tu transporte en tiempo real el día del viaje.</p>
+            <div id="student-map"></div>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase.js"></script>
+    <script src="estudiante.js"></script>
+</body>
+</html>

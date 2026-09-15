@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OmniTravel - Superadmin SPA</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Leaflet para Mapas -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            background-color: var(--card-bg);
+            border-right: 1px solid var(--card-border);
+            padding: 2rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        
+        .sidebar-menu { display: flex; flex-direction: column; gap: 0.5rem; }
+        
+        .menu-item {
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-md);
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+        .menu-item:hover, .menu-item.active {
+            background-color: #f1f5f9;
+            color: var(--accent);
+        }
+        
+        .main-content {
+            padding: 2rem;
+            background-color: var(--bg);
+            overflow-y: auto;
+        }
+        
+        .stat-card {
+            padding: 1.5rem;
+            background: #fff;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--card-border);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .stat-card h3 { font-size: 2rem; color: var(--text-main); margin: 0; }
+        
+        #global-map, #routing-map {
+            width: 100%;
+            height: 400px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--card-border);
+            z-index: 1;
+        }
+
+        /* === DISEÑO DE BUS HORIZONTAL === */
+        .bus-horizontal {
+            display: flex;
+            flex-direction: row-reverse;
+            align-items: center;
+            gap: 15px;
+            background: #e2e8f0;
+            padding: 20px 30px;
+            border-radius: 50px 100px 100px 50px;
+            border: 6px solid #94a3b8;
+            overflow-x: auto;
+            max-width: 100%;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        .bus-front {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 180px;
+            padding-left: 20px;
+            border-left: 2px dashed #cbd5e1;
+        }
+
+        .steering-wheel {
+            width: 45px; height: 45px; 
+            border-radius: 50%; 
+            border: 6px solid #475569;
+            background: #cbd5e1;
+            position: relative;
+        }
+        .steering-wheel::after {
+            content: ''; position: absolute; top:50%; left:0; right:0; height:4px; background:#475569; transform: translateY(-50%);
+        }
+
+        .bus-column {
+            display: flex;
+            flex-direction: column;
+            gap: 40px; 
+        }
+        
+        .seat-pair { 
+            display: flex; 
+            flex-direction: column;
+            gap: 5px; 
+        }
+
+        .seat {
+            width: 45px; height: 40px; 
+            background: #38bdf8; 
+            border: 2px solid #0284c7;
+            border-radius: 5px 12px 12px 5px; 
+            position: relative; 
+            cursor: pointer; transition: var(--transition);
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 0.85rem; font-weight: 800; color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: inset 4px 0 0 rgba(0,0,0,0.15); 
+        }
+        
+        .seat::before {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: 4px;
+            bottom: 4px;
+            width: 12px;
+            background: #0284c7;
+            border-radius: 3px;
+            z-index: 0;
+        }
+        
+        .seat span { position: relative; z-index: 1; margin-left: 8px; }
+        
+        .seat:hover:not(.occupied):not(.selected) { background: #7dd3fc; border-color: #0369a1; transform: translateY(-2px); }
+        .seat.occupied { background: #f87171; border-color: #b91c1c; cursor: not-allowed; }
+        .seat.occupied::before { background: #b91c1c; }
+        
+        .seat.selected { background: var(--success); border-color: #047857; }
+        .seat.selected::before { background: #047857; }
+        
+        .table-responsive { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: var(--radius-md); overflow: hidden; }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid var(--card-border); }
+        th { background: #f8fafc; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+        .badge.pending { background: #fef3c7; color: #d97706; }
+        .badge.approved { background: #d1fae5; color: #059669; }
+        
+        .topology-select { display: flex; gap: 10px; margin-bottom: 15px; }
+        .topo-btn { flex: 1; padding: 10px; border: 1px solid var(--card-border); background: #fff; border-radius: var(--radius-sm); cursor:pointer; text-align:center;}
+        .topo-btn.active { border-color: var(--accent); background: #eff6ff; color: var(--accent); font-weight:bold;}
+
+        /* SPA Tab System */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .trip-item {
+            background: #fff; border: 1px solid var(--card-border); padding: 1.5rem; 
+            border-radius: var(--radius-md); margin-bottom: 1rem;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .trip-info h4 { margin: 0 0 5px 0; color: var(--text-main); }
+        .trip-info p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-container">
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <a href="#" class="nav-brand" style="padding-bottom: 1rem; border-bottom: 1px solid var(--card-border);">
+                OmniTravel
+            </a>
+            
+            <div class="sidebar-menu">
+                <div class="menu-item active" data-target="dashboard">Dashboard General</div>
+                <div class="menu-item" data-target="aprobaciones">Aprobación Usuarios <span id="badge-pendientes" style="background:var(--error);color:white;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
+                <div class="menu-item" data-target="gestion-usuarios">Gestión de Roles</div>
+                <div class="menu-item" data-target="viajes">Gestión de Viajes</div>
+                <div class="menu-item" data-target="transportes">Transportes</div>
+                <div class="menu-item" style="color: var(--error); margin-top: auto;" onclick="logout()">Cerrar Sesión</div>
+            </div>
+        </div>
+
+        <!-- CONTENIDO PRINCIPAL -->
+        <div class="main-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+                <h2 id="header-title">Panel de Superadministrador</h2>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="user-badge" id="admin-name">Super Admin</span>
+                    <img id="nav-profile-pic" src="" alt="Perfil" style="width: 45px; height: 45px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); box-shadow: var(--shadow-sm); background: #fff;">
+                </div>
+            </div>
+
+            <!-- TABS -->
+            <div id="dashboard" class="tab-content active">
+                <div class="grid grid-3 mb-3">
+                    <div class="stat-card">
+                        <span class="text-muted" style="font-size:0.9rem; font-weight:600;">Estudiantes Aprobados</span>
+                        <h3 style="color: var(--success);" id="stat-usuarios">0</h3>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-muted" style="font-size:0.9rem; font-weight:600;">Viajes Activos</span>
+                        <h3 style="color: var(--accent);" id="stat-viajes">0</h3>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-muted" style="font-size:0.9rem; font-weight:600;">Transportes Globales</span>
+                        <h3 style="color: #6366f1;" id="stat-transportes">0</h3>
+                    </div>
+                </div>
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 class="mb-2">GPS Global en Tiempo Real</h3>
+                    <p class="text-muted mb-2">Ubicación de transportes (En construcción de Realtime).</p>
+                    <div id="global-map"></div>
+                </div>
+            </div>
+
+            <div id="aprobaciones" class="tab-content">
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 class="mb-2">Usuarios por Aprobar</h3>
+                    <p class="text-muted mb-3">Cuentas que solicitan acceso al sistema.</p>
+                    <div class="table-responsive">
+                        <table class="data-table" id="table-aprobaciones">
+                            <thead>
+                                <tr>
+                                    <th>Foto</th>
+                                    <th>Nombre</th>
+                                    <th>Cód. Pasajero</th>
+                                    <th>DNI / Estado</th>
+                                    <th>Fecha Registro</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dinámico -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NUEVA PESTAÑA: GESTIÓN DE ROLES Y VACIADO -->
+            <div id="gestion-usuarios" class="tab-content">
+                <div class="card" style="padding: 1.5rem; margin-bottom: 2rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+                        <div>
+                            <h3 class="mb-2">Administración de Roles</h3>
+                            <p class="text-muted">Cambia los roles de los usuarios aprobados.</p>
+                        </div>
+                        <button class="btn" style="background:var(--error); border-color:var(--error); width:auto;" onclick="vaciarBaseDeDatos()">⚠️ Vaciar Base de Datos</button>
+                    </div>
+                    
+                    <div class="table-responsive mt-3">
+                        <table class="data-table" id="table-roles">
+                            <thead>
+                                <tr>
+                                    <th>Foto</th>
+                                    <th>Nombre</th>
+                                    <th>Email</th>
+                                    <th>Rol Actual</th>
+                                    <th>Cambiar Rol</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Dinámico -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="viajes" class="tab-content">
+                <div class="card" style="padding: 1.5rem; margin-bottom: 2rem;">
+                    <h3 class="mb-2">Planificador Inteligente de Rutas (Waze-style)</h3>
+                    <p class="text-muted mb-3">Haz clic en el mapa para marcar el punto de origen. Luego haz más clics para trazar la ruta y las paradas hasta el destino.</p>
+                    
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:20px;">
+                        <h4 style="color:#0f172a; margin-bottom:15px; display:flex; align-items:center; gap:8px;">
+                            <span>📝</span> Detalles Principales del Viaje
+                        </h4>
+                        <div class="grid grid-2 mb-3">
+                            <div>
+                                <label style="color:#475569; font-size:0.85rem; font-weight:600;">Nombre del Viaje</label>
+                                <input type="text" id="v-nombre" placeholder="Ej. Prácticas Volcán de Santa Ana" required style="border-radius:8px; border:1px solid #cbd5e1; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                            </div>
+                            <div>
+                                <label style="color:#475569; font-size:0.85rem; font-weight:600;">Fecha y Hora de Salida</label>
+                                <input type="datetime-local" id="v-fecha" required style="border-radius:8px; border:1px solid #cbd5e1; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                            </div>
+                        </div>
+                        
+                        <h4 style="color:#0f172a; margin-bottom:15px; margin-top:20px; display:flex; align-items:center; gap:8px;">
+                            <span>⏱️</span> Ventana de Reserva de Asientos
+                        </h4>
+                        <div class="grid grid-2">
+                            <div style="background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe;">
+                                <label style="color:#1e3a8a; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Apertura de Selección</label>
+                                <input type="datetime-local" id="v-inicio-asientos" required style="border-radius:8px; border:1px solid #93c5fd; background:#fff; color:#1e3a8a;">
+                            </div>
+                            <div style="background:#fef2f2; padding:15px; border-radius:8px; border:1px solid #fecaca;">
+                                <label style="color:#991b1b; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Cierre de Selección</label>
+                                <input type="datetime-local" id="v-cierre-asientos" required style="border-radius:8px; border:1px solid #fca5a5; background:#fff; color:#991b1b;">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="routing-map" class="mb-3"></div>
+                    
+                    <button class="btn btn-success" id="btn-save-viaje">Guardar Viaje y Ruta</button>
+                </div>
+
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 class="mb-3">Lista de Viajes Programados</h3>
+                    <div id="lista-viajes">
+                        <!-- Dinámico -->
+                    </div>
+                </div>
+
+                <!-- CONTENEDOR CROQUIS VIP ADMIN -->
+                <div class="card mt-3" id="admin-croquis-container" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h3 class="mb-2">Visor de Croquis (Asignaciones)</h3>
+                        <button class="btn btn-outline" style="width:auto; padding:5px 10px;" onclick="document.getElementById('admin-croquis-container').style.display='none'">Cerrar</button>
+                    </div>
+                    <p class="text-muted mb-3">Como administrador, puedes apartar tu asiento inmediatamente ignorando los horarios.</p>
+                    
+                    <div class="grid grid-2">
+                        <div>
+                            <label>Selecciona Vehículo</label>
+                            <select id="admin-vehiculo-select" onchange="renderAdminCroquis()">
+                                <!-- Dinámico -->
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3" id="admin-croquis" style="margin:0 auto; display:flex; justify-content:center; align-items:center;">
+                        <div class="text-muted">Selecciona un vehículo para ver los asientos.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="transportes" class="tab-content">
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 class="mb-2">Asignar Vehículos a Viajes</h3>
+                    <p class="text-muted mb-3">Asocia topologías de asientos a viajes programados.</p>
+                    
+                    <form id="form-transporte" class="mb-3" style="background: #f8fafc; padding:1.5rem; border-radius:var(--radius-md); border: 1px solid var(--card-border);">
+                        <div>
+                            <label>Seleccionar Viaje</label>
+                            <select id="t-viaje-select" required>
+                                <option value="">Cargando viajes...</option>
+                            </select>
+                        </div>
+                        
+                        <label class="mt-3">Topología del Vehículo (Croquis)</label>
+                        <div class="topology-select" id="t-topologia">
+                            <div class="topo-btn active" data-tipo="bus_50">Autobús (50 Plazas)</div>
+                            <div class="topo-btn" data-tipo="microbus_15">Microbús (15 Plazas)</div>
+                            <div class="topo-btn" data-tipo="moto">Motocicleta (Sin Asientos)</div>
+                        </div>
+                        
+                        <button type="submit" class="btn mt-2">Agregar Vehículo</button>
+                    </form>
+
+                    <div id="lista-transportes" class="mb-3">
+                        <!-- Dinámico -->
+                    </div>
+
+                    <hr>
+                    <h3 class="mb-2">Asignación Manual de Pasajeros</h3>
+                    <p class="text-muted mb-3">Asigna usuarios que se han anotado a un vehículo específico.</p>
+                    <div class="grid grid-2 mb-2">
+                        <div>
+                            <label>Filtro por Viaje</label>
+                            <select id="a-viaje-select" onchange="cargarAnotadosYVehiculos()">
+                                <option value="">Seleccione un viaje...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table" id="table-asignacion">
+                            <thead>
+                                <tr>
+                                    <th>Foto</th>
+                                    <th>Nombre</th>
+                                    <th>DNI</th>
+                                    <th>Asignar a Vehículo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="4" style="text-align:center;">Seleccione un viaje primero.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="supabase.js"></script>
+    <script src="superadmin.js"></script>
+</body>
+</html>

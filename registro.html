@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OmniTravel - Registro</title>
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <style>
+        .step {
+            display: none;
+        }
+
+        .step.active {
+            display: block;
+            animation: fadeUp 0.4s ease;
+        }
+    </style>
+</head>
+
+<body class="flex-center">
+
+    <div class="container" style="max-width: 650px;">
+        <div class="card">
+
+            <div class="progress-container">
+                <div class="step-indicator current" id="ind-1">1</div>
+                <div class="step-indicator" id="ind-2">2</div>
+                <div class="step-indicator" id="ind-3">3</div>
+                <div class="step-indicator" id="ind-4">4</div>
+            </div>
+
+            <!-- PASO 1: INFO GENERAL -->
+            <div class="step active" id="step-1">
+                <div class="text-center mb-3">
+                    <h2>Información General</h2>
+                    <p>Datos personales del estudiante / usuario</p>
+                </div>
+                <form id="form-1">
+                    <label>Nombre Completo</label>
+                    <input type="text" id="r-nombre" required>
+
+                    <div class="grid grid-2">
+                        <div>
+                            <label>Teléfono</label>
+                            <div style="display: flex; gap: 8px;">
+                                <select id="r-country-code" style="width: 45%; padding: 0.85rem 0.5rem;" required>
+                                    <option value="+503" data-length="8" data-dni-name="DUI (00000000-0)"
+                                        data-dni-length="10" data-dni-format="sv">🇸🇻 +503 (SV)</option>
+                                    <option value="+502" data-length="8" data-dni-name="DPI (13 dígitos)"
+                                        data-dni-length="13" data-dni-format="num">🇬🇹 +502 (GT)</option>
+                                    <option value="+504" data-length="8" data-dni-name="DNI (13 dígitos)"
+                                        data-dni-length="13" data-dni-format="num">🇭🇳 +504 (HN)</option>
+                                    <option value="+505" data-length="8" data-dni-name="Cédula (14 caracteres)"
+                                        data-dni-length="14" data-dni-format="any">🇳🇮 +505 (NI)</option>
+                                    <option value="+506" data-length="8" data-dni-name="Cédula (9 dígitos)"
+                                        data-dni-length="9" data-dni-format="num">🇨🇷 +506 (CR)</option>
+                                    <option value="+507" data-length="8" data-dni-name="Cédula / Pasaporte"
+                                        data-dni-length="15" data-dni-format="any">🇵🇦 +507 (PA)</option>
+                                    <option value="+52" data-length="10" data-dni-name="CURP (18 caracteres)"
+                                        data-dni-length="18" data-dni-format="any">🇲🇽 +52 (MX)</option>
+                                    <option value="+1" data-length="10" data-dni-name="ID / SSN" data-dni-length="15"
+                                        data-dni-format="any">🇺🇸 +1 (US)</option>
+                                </select>
+                                <input type="text" id="r-tel" placeholder="00000000" style="width: 55%;" required>
+                            </div>
+                            <small id="tel-error"
+                                style="color: var(--error); font-size: 0.8rem; display: none; margin-top: 4px;">Longitud
+                                inválida.</small>
+                        </div>
+                        <div>
+                            <label id="label-dni">DUI (00000000-0)</label>
+                            <input type="text" id="r-dni" required>
+                            <small id="dni-error"
+                                style="color: var(--error); font-size: 0.8rem; display: none; margin-top: 4px;">Formato
+                                de documento inválido.</small>
+                            <label class="checkbox-group" style="margin-top: 10px;">
+                                <input type="checkbox" id="r-menor">
+                                Soy menor de edad (sin documento)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-2">
+                        <div>
+                            <label>Fecha de Nacimiento</label>
+                            <input type="date" id="r-fecha" required>
+                        </div>
+                        <div>
+                            <label>Código de Estudiante</label>
+                            <input type="text" id="r-codigo" placeholder="Ej: AB12345" required>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn mt-3" onclick="nextStep(1, 2)">Siguiente Paso →</button>
+                    <div class="text-center mt-2"><a href="index.html" class="text-muted"
+                            style="text-decoration:none; font-weight:500;">← Volver al Inicio</a></div>
+                </form>
+            </div>
+
+            <!-- PASO 2: CREDENCIALES Y FACE ID -->
+            <div class="step" id="step-2">
+                <div class="text-center mb-3">
+                    <h2>Credenciales y Face ID</h2>
+                    <p>Seguridad y reconocimiento facial</p>
+                </div>
+                <form id="form-2">
+                    <div class="grid grid-2 mb-2">
+                        <div>
+                            <label>Correo Electrónico</label>
+                            <input type="email" id="r-email" required>
+                        </div>
+                        <div>
+                            <label>Contraseña Segura</label>
+                            <input type="password" id="r-pass" required minlength="6">
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="text-center mb-2">
+                        <label>Registro de Rostro (Face ID)</label>
+                        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">Mira directamente a la
+                            cámara para generar tu clave biométrica. Asegúrate de tener buena luz.</p>
+
+                        <div class="face-scanner mb-2" id="cam-container">
+                            <video id="video-registro" autoplay muted playsinline></video>
+                            <div class="face-overlay" id="overlay"></div>
+                            <canvas id="canvas-overlay-reg"
+                                style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                        </div>
+
+                        <img id="img-perfil" class="mx-auto"
+                            style="width: 100%; max-width: 250px; border-radius: var(--radius-md); display: none; border: 2px solid var(--success);">
+
+                        <div class="grid grid-2 mt-2">
+                            <button type="button" class="btn btn-outline" id="btn-start-cam"
+                                onclick="startRegistroFace()">Activar Cámara</button>
+                            <button type="button" class="btn btn-success" id="btn-take-foto" onclick="captureFace()"
+                                disabled>Escanear Rostro</button>
+                        </div>
+                        <p id="face-reg-status" class="mt-2 text-muted" style="font-size: 0.85rem; font-weight:600;">
+                        </p>
+                    </div>
+
+                    <div class="grid grid-2 mt-3">
+                        <button type="button" class="btn btn-outline" onclick="prevStep(2, 1)">← Volver</button>
+                        <button type="button" class="btn" onclick="validateStep2()">Siguiente Paso →</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- PASO 3: RESIDENCIA -->
+            <div class="step" id="step-3">
+                <div class="text-center mb-3">
+                    <h2>Información de Residencia</h2>
+                    <p>Ubicación actual para fines logísticos</p>
+                </div>
+                <form id="form-3">
+                    <div class="grid grid-2 mb-2">
+                        <div>
+                            <label>Departamento</label>
+                            <select id="r-depto" required onchange="cargarMunicipios()">
+                                <option value="" disabled selected>Selecciona...</option>
+                                <!-- Se llena vía JS -->
+                            </select>
+                        </div>
+                        <div>
+                            <label>Municipio</label>
+                            <select id="r-muni" required>
+                                <option value="" disabled selected>Selecciona un departamento primero...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-2 mt-3">
+                        <button type="button" class="btn btn-outline" onclick="prevStep(3, 2)">← Volver</button>
+                        <button type="submit" id="btn-submit-final" class="btn btn-success">Finalizar Registro</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- PASO 4: ESPERA -->
+            <div class="step" id="step-4">
+                <div class="text-center" style="padding: 2rem 0;">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round"
+                        style="margin-bottom:1rem; animation: pulse 2s infinite;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <h2>Registro Completado</h2>
+                    <p class="mt-2 text-main" style="font-weight: 500;">Tu cuenta ha sido creada exitosamente.</p>
+                    <p class="mt-2 text-muted">Por favor, espera la confirmación de la administración.</p>
+                    <p class="mt-2 text-muted" style="font-size: 0.85rem;">Se te notificará por correo electrónico
+                        cuando tu cuenta esté activada.</p>
+
+                    <button class="btn mt-3" onclick="window.location.href='index.html'">Volver al Inicio</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="supabase.js"></script>
+    <script src="app.js"></script>
+    <script>
+        // --- VALIDACIÓN DE TELÉFONO Y PREFIJO ---
+        const telInput = document.getElementById('r-tel');
+        const countrySelect = document.getElementById('r-country-code');
+        const telError = document.getElementById('tel-error');
+
+        // Limpiar input y actualizar label de DNI al cambiar de país
+        countrySelect.addEventListener('change', () => {
+            telInput.value = '';
+            telError.style.display = 'none';
+
+            dniInput.value = '';
+            dniError.style.display = 'none';
+
+            const selectedOption = countrySelect.options[countrySelect.selectedIndex];
+            const dniName = selectedOption.getAttribute('data-dni-name');
+            document.getElementById('label-dni').innerText = dniName;
+            dniInput.placeholder = dniName;
+        });
+
+        // Solo permitir números y restringir longitud según prefijo
+        telInput.addEventListener('input', (e) => {
+            // Quitar todo lo que no sea número
+            let value = e.target.value.replace(/\D/g, '');
+
+            // Obtener max length permitido
+            const selectedOption = countrySelect.options[countrySelect.selectedIndex];
+            const maxLength = parseInt(selectedOption.getAttribute('data-length'));
+
+            if (value.length > maxLength) {
+                value = value.substring(0, maxLength);
+            }
+            e.target.value = value;
+
+            // Validar longitud y mostrar error en vivo
+            if (value.length > 0 && value.length < maxLength) {
+                telError.style.display = 'block';
+                telError.innerText = `Faltan dígitos. Deben ser ${maxLength} números.`;
+            } else {
+                telError.style.display = 'none';
+            }
+        });
+
+        // Validación dinámica del Documento de Identidad
+        const dniInput = document.getElementById('r-dni');
+        const dniError = document.getElementById('dni-error');
+
+        dniInput.addEventListener('input', (e) => {
+            const selectedOption = countrySelect.options[countrySelect.selectedIndex];
+            const formatType = selectedOption.getAttribute('data-dni-format');
+            const maxLength = parseInt(selectedOption.getAttribute('data-dni-length'));
+
+            let value = e.target.value;
+
+            // Limitar según formato
+            if (formatType === 'sv') {
+                // Formato DUI El Salvador: 8 números + guión + 1 número
+                value = value.replace(/[^0-9-]/g, ''); // solo nums y guiones
+                value = value.replace(/-/g, ''); // quitar guiones temporales
+
+                if (value.length > 8) {
+                    value = value.substring(0, 8) + '-' + value.substring(8, 9);
+                }
+            } else if (formatType === 'num') {
+                // Solo números
+                value = value.replace(/\D/g, '');
+            } else {
+                // Alfanumérico (cualquier formato)
+                value = value.toUpperCase();
+            }
+
+            // Limitar longitud máxima
+            if (value.length > maxLength) {
+                value = value.substring(0, maxLength);
+            }
+            e.target.value = value;
+
+            // Validación de longitud mínima/exacta
+            if (value.length > 0) {
+                if ((formatType === 'sv' && value.length < 10) || (formatType !== 'sv' && value.length < maxLength)) {
+                    dniError.style.display = 'block';
+                    dniError.innerText = `El documento debe tener ${maxLength} caracteres.`;
+                } else {
+                    dniError.style.display = 'none';
+                }
+            } else {
+                dniError.style.display = 'none';
+            }
+        });
+
+        // Lógica de "Soy menor de edad"
+        const chkMenor = document.getElementById('r-menor');
+        chkMenor.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                dniInput.disabled = true;
+                dniInput.required = false;
+                dniInput.value = '';
+                dniError.style.display = 'none';
+                document.getElementById('label-dni').style.color = 'var(--text-muted)';
+            } else {
+                dniInput.disabled = false;
+                dniInput.required = true;
+                document.getElementById('label-dni').style.color = 'var(--text-main)';
+            }
+        });
+    </script>
+</body>
+
+</html>
