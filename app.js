@@ -294,8 +294,7 @@ function loginDetectFaceLoop(video) {
 
             if (window.livenessStage === 0) {
                 if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Sonríe abiertamente a la cámara.";
-                if (detections.expressions && detections.expressions.happy > 0.8) window.livenessStage = 1; // Fallback para login
-                else if (detection.expressions && detection.expressions.happy > 0.8) window.livenessStage = 1; 
+                if (detection.expressions && detection.expressions.happy > 0.8) window.livenessStage = 1; 
             } 
             else if (window.livenessStage === 1) {
                 if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Ponte serio(a) y gira la cabeza a la IZQUIERDA.";
