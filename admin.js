@@ -450,7 +450,7 @@ function genAdminSeat(numero, ocupadosInfo, miAsiento, viajeId, transporteId) {
     else if(usuarioAsiento) {
         clase += ' occupied';
         const u = usuarioAsiento;
-        const foto = u.foto_perfil || \`https://ui-avatars.com/api/?name=\${encodeURIComponent(u.nombre_completo)}&background=random\`;
+        const foto = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
         onclickFn = `verDetalleAsiento('${u.nombre_completo}', '${foto}', '${u.dni}', '${u.fecha_reserva}')`;
     }
 

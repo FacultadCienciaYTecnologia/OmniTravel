@@ -155,6 +155,7 @@ async function loadEstudianteDashboard() {
             
             updateSeatTimer();
             window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
+        }
 
         // Cargar Ruta en el Mapa
         if (viaje.ruta && viaje.ruta.length > 0) {
