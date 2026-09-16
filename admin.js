@@ -60,9 +60,28 @@ async function loadAdminDashboard() {
         // Si ya está en ruta, forzar encendido de GPS (visual)
         if(viajes[0].estado === 'en_ruta') {
             document.getElementById('gps-toggle').checked = true;
-            activarGPS();
             document.getElementById('btn-iniciar').style.display = 'none';
             document.getElementById('btn-finalizar').style.display = 'inline-block';
+            activarGPS(); // Tratar de reconectar GPS
+        }
+
+        // ====== SUSCRIPCIONES REALTIME ======
+        if (!window.adminChannel) {
+            window.adminChannel = window.db.channel('admin-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+                    // Si cambian los pasajeros o asientos
+                    if(viajeIdActual) {
+                        lastAdminOccupiedStr = "";
+                        cargarManifiesto();
+                        cargarAnotadosYVehiculos();
+                        renderAdminCroquis();
+                    }
+                })
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
+                    // Si el superadmin reinicia o edita el viaje, recargar
+                    window.location.reload();
+                })
+                .subscribe();
         }
 
     } catch (e) {

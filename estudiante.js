@@ -129,9 +129,9 @@ async function loadEstudianteDashboard() {
                     timerDiv.style.color = '#15803d';
                     timerDiv.innerHTML = `¡Selección Abierta! Cierra en: ${d > 0 ? d+'d ' : ''}${h}h ${m}m ${s}s`;
                     
-                    if(!croquisInterval) {
+                    if(!window.croquisRendered) {
                         renderCroquisEstudiante(viaje.id, session.transporte_id);
-                        croquisInterval = setInterval(() => renderCroquisEstudiante(viaje.id, session.transporte_id), 2500);
+                        window.croquisRendered = true;
                     }
                 } 
                 else {
@@ -142,12 +142,11 @@ async function loadEstudianteDashboard() {
                     
                     if(estado !== 'asiento_elegido') {
                         croquisDiv.innerHTML = `<p class="text-center" style="margin:20px;">Ya no puedes seleccionar asiento.</p>`;
-                        if(croquisInterval) { clearInterval(croquisInterval); croquisInterval = null; }
                     } else {
                         // Ya eligió, mostrar croquis de solo lectura
-                        if(!croquisInterval) {
+                        if(!window.croquisRendered) {
                             renderCroquisEstudiante(viaje.id, session.transporte_id);
-                            croquisInterval = setInterval(() => renderCroquisEstudiante(viaje.id, session.transporte_id), 5000);
+                            window.croquisRendered = true;
                         }
                     }
                 }
@@ -235,12 +234,30 @@ async function loadEstudianteDashboard() {
             });
         }
 
-        // Obtener info del transporte si lo tiene
         if(session.transporte_id) {
             const { data: transporte } = await window.db.from('transportes').select('*').eq('id', session.transporte_id).single();
             if(transporte) {
                 document.getElementById('v-transporte').innerText = `Vehículo: ${transporte.tipo.replace('_', ' ').toUpperCase()}`;
             }
+        }
+
+        // ====== SUSCRIPCIONES REALTIME ======
+        if (!window.estudianteChannel) {
+            window.estudianteChannel = window.db.channel('estudiante-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+                    // Si alguien tomó asiento o el admin asignó a alguien
+                    if(window.currentViajeId && session.transporte_id) {
+                        lastOccupiedStr = ""; // Forzar recargo
+                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                        cargarMiembros(session.transporte_id);
+                        cargarMiembrosGenerales(window.currentViajeId);
+                    }
+                })
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
+                    // Recargar todo si el viaje cambia de estado
+                    loadEstudianteDashboard();
+                })
+                .subscribe();
         }
 
     } catch (e) {

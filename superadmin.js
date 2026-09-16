@@ -870,8 +870,25 @@ function cargarSelectAdminVehiculos(transportesArray) {
 
 // Inicializar
 loadDashboard();
-setInterval(() => {
-    if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
-        renderAdminCroquis();
-    }
-}, 2500);
+
+// ====== SUSCRIPCIONES REALTIME ======
+if (!window.superadminChannel) {
+    window.superadminChannel = window.db.channel('superadmin-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+            // Actualizar tablas de usuarios y croquis si hay admin seleccionado
+            loadDashboard(); // Refresca stats y pendientes
+            if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
+                renderAdminCroquis();
+            }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
+            loadDashboard(); // Refresca lista de viajes
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
+            // Refrescar mapa si estamos viendo la ruta activa
+            if(window.currentViajeMonitoreo) {
+                verRutaActiva(window.currentViajeMonitoreo);
+            }
+        })
+        .subscribe();
+}
