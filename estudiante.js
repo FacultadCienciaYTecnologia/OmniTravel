@@ -250,14 +250,12 @@ async function loadEstudianteDashboard() {
                     if (payload.new && payload.new.id === session.id) {
                         loadEstudianteDashboard();
                     } 
-                    // Si alguien tomó asiento o el admin asignó a alguien en mi mismo transporte
+                    // Si alguien más tomó asiento o el admin asignó a alguien
                     else if(window.currentViajeId && session.transporte_id) {
-                        if (payload.new && payload.new.transporte_id === session.transporte_id) {
-                            lastOccupiedStr = ""; // Forzar recargo
-                            renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
-                            cargarMiembros(session.transporte_id);
-                            cargarMiembrosGenerales(window.currentViajeId);
-                        }
+                        lastOccupiedStr = ""; // Forzar recargo
+                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                        cargarMiembros(session.transporte_id);
+                        cargarMiembrosGenerales(window.currentViajeId);
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
