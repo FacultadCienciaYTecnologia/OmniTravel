@@ -485,7 +485,8 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', session.id);
+                    const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', session.id);
+                    if (error) throw error;
                     session.asiento = null;
                     session.estado_viaje = 'asignado';
                     localStorage.setItem('omni_user', JSON.stringify(session));
@@ -508,7 +509,8 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
+                    const { error } = await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
+                    if (error) throw error;
                     session.asiento = numero.toString();
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('¡Éxito!', 'Asiento cambiado.', 'success');
@@ -538,11 +540,12 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     return Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
                 }
 
-                await window.db.from('usuarios').update({
+                const { error } = await window.db.from('usuarios').update({
                     asiento: numero.toString(),
                     estado_viaje: 'asiento_elegido',
                     fecha_reserva: new Date().toISOString()
                 }).eq('id', session.id);
+                if (error) throw error;
                 
                 session.asiento = numero.toString();
                 session.estado_viaje = 'asiento_elegido';

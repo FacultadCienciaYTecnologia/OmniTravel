@@ -784,7 +784,8 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', session.id);
+                    const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', session.id);
+                    if (error) throw error;
                     session.asiento = null;
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('Liberado', 'Tu asiento VIP ha sido liberado.', 'success');
@@ -806,7 +807,8 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
+                    const { error } = await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
+                    if (error) throw error;
                     session.asiento = numero.toString();
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
@@ -837,13 +839,14 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     return Swal.fire('Error', 'Ese asiento acaba de ser tomado.', 'error');
                 }
 
-                await window.db.from('usuarios').update({
+                const { error } = await window.db.from('usuarios').update({
                     viaje_id: viajeId,
                     transporte_id: transporteId,
                     estado_viaje: 'asiento_elegido',
                     asiento: numero.toString(),
                     fecha_reserva: new Date().toISOString()
                 }).eq('id', session.id);
+                if (error) throw error;
                 
                 session.asiento = numero.toString();
                 session.viaje_id = viajeId;
