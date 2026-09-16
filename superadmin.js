@@ -88,7 +88,10 @@ async function renderPendientes() {
                 <td>${u.dni || 'Menor'}</td>
                 <td>${new Date(u.creado_en).toLocaleDateString()}</td>
                 <td>
-                    <button class="btn btn-success" style="padding: 5px 10px; font-size: 0.8rem; width: auto;" onclick="aprobarUsuario('${u.id}')">Aprobar</button>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                        <button class="btn btn-success" style="padding: 5px 10px; font-size: 0.8rem; flex:1;" onclick="aprobarUsuario('${u.id}')">Aprobar</button>
+                        <button class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem; flex:1;" onclick="rechazarUsuario('${u.id}')">Rechazar / Eliminar</button>
+                    </div>
                 </td>
             </tr>
         `;
@@ -130,7 +133,6 @@ async function renderRoles() {
                         <option value="estudiante">Estudiante</option>
                     </select>
                     <div style="display:flex; gap:5px;">
-                        <button class="btn btn-outline" style="padding: 2px 5px; font-size: 0.7rem; flex:1; border-color:#d97706; color:#d97706;" onclick="desaprobarUsuario('${u.id}')">Desaprobar</button>
                         <button class="btn btn-outline" style="padding: 2px 5px; font-size: 0.7rem; flex:1; border-color:var(--error); color:var(--error);" onclick="eliminarUsuario('${u.id}')">Eliminar</button>
                     </div>
                 </td>
@@ -139,21 +141,20 @@ async function renderRoles() {
     });
 }
 
-async function desaprobarUsuario(id) {
-    if(id === session.id) return Swal.fire('Error', 'No puedes desaprobarte a ti mismo.', 'error');
+async function rechazarUsuario(id) {
     Swal.fire({
-        title: '¿Desaprobar usuario?',
-        text: "Volverá a la lista de pendientes.",
-        icon: 'warning',
+        title: '¿Rechazar solicitud?',
+        text: "El usuario será eliminado y tendrá que registrarse nuevamente si desea acceso.",
+        icon: 'error',
         showCancelButton: true,
-        confirmButtonText: 'Sí, desaprobar'
+        confirmButtonText: 'Sí, rechazar y eliminar'
     }).then(async (result) => {
         if(result.isConfirmed) {
             try {
-                await window.db.from('usuarios').update({ estado_aprobacion: 'pendiente' }).eq('id', id);
-                Swal.fire('Hecho', 'Usuario desaprobado.', 'success');
+                await window.db.from('usuarios').delete().eq('id', id);
+                Swal.fire('Eliminado', 'La solicitud ha sido rechazada y eliminada.', 'success');
                 loadDashboard();
-            } catch(e) { Swal.fire('Error', 'No se pudo desaprobar.', 'error'); }
+            } catch(e) { Swal.fire('Error', 'No se pudo rechazar la solicitud.', 'error'); }
         }
     });
 }

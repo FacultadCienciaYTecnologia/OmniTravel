@@ -85,7 +85,8 @@ async function loadFaceModels() {
         await Promise.all([
             faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
             faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+            faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
         ]);
         faceModelsLoaded = true;
         console.log("Modelos Face-API cargados");
@@ -139,7 +140,7 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
     faceapi.matchDimensions(canvas, displaySize);
     
     faceInterval = setInterval(async () => {
-        const detections = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+        const detections = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceExpressions().withFaceDescriptor();
         
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -159,16 +160,16 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
             const ratio = distLeft / distRight;
 
             if (window.livenessStage === 0) {
-                if(statusLabel) statusLabel.innerText = "PRUEBA 3D: Mira fijamente al frente.";
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Sonríe abiertamente a la cámara.";
                 overlay.style.borderColor = "var(--warning)";
-                if (ratio > 0.8 && ratio < 1.2) window.livenessStage = 1;
+                if (detections.expressions.happy > 0.8) window.livenessStage = 1;
             } 
             else if (window.livenessStage === 1) {
-                if(statusLabel) statusLabel.innerText = "PRUEBA 3D: Gira la cabeza levemente a la IZQUIERDA.";
-                if (ratio > 1.4) window.livenessStage = 2; 
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Ponte serio(a) y gira la cabeza a la IZQUIERDA.";
+                if (ratio > 1.4 && detections.expressions.happy < 0.2) window.livenessStage = 2; 
             }
             else if (window.livenessStage === 2) {
-                if(statusLabel) statusLabel.innerText = "PRUEBA 3D: Gira la cabeza levemente a la DERECHA.";
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Gira la cabeza levemente a la DERECHA.";
                 if (ratio < 0.7) window.livenessStage = 3; 
             }
             else if (window.livenessStage === 3) {
@@ -278,7 +279,7 @@ function loginDetectFaceLoop(video) {
             return;
         }
 
-        const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+        const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceExpressions().withFaceDescriptor();
         
         if (detection) {
             // --- PRUEBA DE VIDA (3D ANTI-SPOOFING) ---
@@ -292,15 +293,17 @@ function loginDetectFaceLoop(video) {
             const ratio = distLeft / distRight;
 
             if (window.livenessStage === 0) {
-                if(statusLabel) statusLabel.innerText = "MIRA AL FRENTE para iniciar escaneo...";
-                if (ratio > 0.8 && ratio < 1.2) window.livenessStage = 1;
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Sonríe abiertamente a la cámara.";
+                if (detections.expressions && detections.expressions.happy > 0.8) window.livenessStage = 1; // Fallback para login
+                else if (detection.expressions && detection.expressions.happy > 0.8) window.livenessStage = 1; 
             } 
             else if (window.livenessStage === 1) {
-                if(statusLabel) statusLabel.innerText = "PRUEBA 3D: Gira la cabeza levemente a la IZQUIERDA.";
-                if (ratio > 1.4) window.livenessStage = 2; 
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Ponte serio(a) y gira la cabeza a la IZQUIERDA.";
+                const isNeutral = (detection.expressions ? detection.expressions.happy < 0.2 : true);
+                if (ratio > 1.4 && isNeutral) window.livenessStage = 2; 
             }
             else if (window.livenessStage === 2) {
-                if(statusLabel) statusLabel.innerText = "PRUEBA 3D: Gira la cabeza levemente a la DERECHA.";
+                if(statusLabel) statusLabel.innerText = "PRUEBA DE VIDA: Gira la cabeza levemente a la DERECHA.";
                 if (ratio < 0.7) window.livenessStage = 3; 
             }
             else if (window.livenessStage === 3) {
