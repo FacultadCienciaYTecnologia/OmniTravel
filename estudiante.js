@@ -22,6 +22,7 @@ let busMarker = null;
 
 // ====== CARGA DE DATOS ======
 async function loadEstudianteDashboard() {
+    window.croquisRendered = false; // Forzar que el croquis se dibuje al cargar el dashboard
     try {
         // Refrescar datos del usuario desde la BD
         const { data: user } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
@@ -245,12 +246,18 @@ async function loadEstudianteDashboard() {
         if (!window.estudianteChannel) {
             window.estudianteChannel = window.db.channel('estudiante-realtime')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
-                    // Si alguien tomó asiento o el admin asignó a alguien
-                    if(window.currentViajeId && session.transporte_id) {
-                        lastOccupiedStr = ""; // Forzar recargo
-                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
-                        cargarMiembros(session.transporte_id);
-                        cargarMiembrosGenerales(window.currentViajeId);
+                    // Si mi propio usuario fue modificado por el admin/superadmin (ej. asignación de vehículo)
+                    if (payload.new && payload.new.id === session.id) {
+                        loadEstudianteDashboard();
+                    } 
+                    // Si alguien tomó asiento o el admin asignó a alguien en mi mismo transporte
+                    else if(window.currentViajeId && session.transporte_id) {
+                        if (payload.new && payload.new.transporte_id === session.transporte_id) {
+                            lastOccupiedStr = ""; // Forzar recargo
+                            renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                            cargarMiembros(session.transporte_id);
+                            cargarMiembrosGenerales(window.currentViajeId);
+                        }
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
@@ -331,12 +338,19 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     const { data: t } = await window.db.from('transportes').select('tipo').eq('id', transporteId).single();
     if(!t) return;
     
-    const { data: usuarios } = await window.db.from('usuarios').select('asiento').eq('transporte_id', transporteId).not('asiento', 'is', null);
-    const asientosOcupados = usuarios ? usuarios.map(u => u.asiento).sort() : [];
-    const occupiedStr = JSON.stringify(asientosOcupados);
+    const { data: usuarios } = await window.db.from('usuarios').select('asiento, nombre_completo, rol').eq('transporte_id', transporteId).not('asiento', 'is', null);
+    const asientosOcupadosInfo = {};
+    const asientosOcupados = asientosOcupadosInfo;
+    
+    const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.nombre_completo).sort() : [];
+    const occupiedStr = JSON.stringify(occupiedIds);
 
     if (croquisDiv.innerHTML !== '' && lastOccupiedStr === occupiedStr) return; // Evitar parpadeos si no hay cambios
     lastOccupiedStr = occupiedStr;
+
+    if(usuarios) {
+        usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
+    }
 
     const miAsiento = session.asiento; 
     const plazas = t.tipo === 'bus_50' ? 50 : (t.tipo === 'microbus_15' ? 15 : 2);
@@ -344,67 +358,60 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
 
     if (plazas === 2) {
         html = `
-            <div style="display:flex; justify-content:center; width:100%; margin-top:10px;">
-                <div style="display: flex; flex-direction: row-reverse; align-items: center; background: #cbd5e1; padding: 20px 40px; border-radius: 80px 20px 20px 80px; border: 5px solid #94a3b8; gap: 15px; box-shadow: inset 0 0 15px rgba(0,0,0,0.15);">
-                    
-                    <!-- Frente (Manubrio y Foco) -->
-                    <div style="display: flex; flex-direction: column; align-items: center; margin-left: 10px;">
-                        <div style="width: 20px; height: 70px; background: #1e293b; border-radius: 10px; position:relative;">
-                            <div style="position:absolute; right:-12px; top:50%; transform:translateY(-50%); width:12px; height:25px; background:#fde047; border-radius:50%; box-shadow: 0 0 10px #fde047;"></div>
-                        </div>
-                    </div>
-
-                    <!-- Asientos (Piloto y Copiloto) -->
-                    <div style="display: flex; gap: 8px;">
+            <div class="bus-vertical-container" style="max-width: 150px;">
+                <div class="bus-v-front">
+                    <div class="steering-wheel-v"></div>
+                </div>
+                <div class="bus-v-row" style="justify-content: center;">
+                    <div class="bus-v-group">
                         ${genSeat(1, asientosOcupados, miAsiento)}
                         ${genSeat(2, asientosOcupados, miAsiento)}
                     </div>
-                    
-                    <!-- Cola de moto -->
-                    <div style="width: 30px; height: 50px; background: #334155; border-radius: 10px; margin-right: 10px;"></div>
                 </div>
             </div>
         `;
     } else if (plazas === 15) {
-        html = `<div class="bus-horizontal" style="border-radius: 40px; padding: 20px;">
-                    <!-- Columna 1: Frente (Copilotos y Volante) -->
-                    <div class="bus-front" style="justify-content: space-between; height: 180px; border:none; padding-left:10px;">
-                        <div class="seat-pair">
+        html = `<div class="bus-vertical-container">
+                    <!-- Fila 1: Volante y Copilotos -->
+                    <div class="bus-v-front">
+                        <div class="steering-wheel-v"></div>
+                        <div class="bus-v-group">
                             ${genSeat(1, asientosOcupados, miAsiento)}
                             ${genSeat(2, asientosOcupados, miAsiento)}
                         </div>
-                        <div class="steering-wheel"></div>
                     </div>
 
-                    <!-- Columna 2: Puerta arriba, 3 asientos abajo -->
-                    <div class="bus-column" style="justify-content: flex-end; gap: 0;">
-                        <div class="seat-pair">
+                    <!-- Fila 2: 3 asientos -->
+                    <div class="bus-v-row">
+                        <div class="bus-v-group" style="width: 100%; justify-content: flex-end;">
                             ${genSeat(3, asientosOcupados, miAsiento)}
                             ${genSeat(4, asientosOcupados, miAsiento)}
                             ${genSeat(5, asientosOcupados, miAsiento)}
                         </div>
                     </div>
 
-                    <!-- Columna 3: 1 asiento arriba, pasillo, 2 asientos abajo -->
-                    <div class="bus-column" style="justify-content: space-between;">
+                    <!-- Fila 3: 1, pasillo, 2 -->
+                    <div class="bus-v-row">
                         ${genSeat(6, asientosOcupados, miAsiento)}
-                        <div class="seat-pair">
+                        <div class="bus-v-aisle"></div>
+                        <div class="bus-v-group">
                             ${genSeat(7, asientosOcupados, miAsiento)}
                             ${genSeat(8, asientosOcupados, miAsiento)}
                         </div>
                     </div>
 
-                    <!-- Columna 4: 1 asiento arriba, pasillo, 2 asientos abajo -->
-                    <div class="bus-column" style="justify-content: space-between;">
+                    <!-- Fila 4: 1, pasillo, 2 -->
+                    <div class="bus-v-row">
                         ${genSeat(9, asientosOcupados, miAsiento)}
-                        <div class="seat-pair">
+                        <div class="bus-v-aisle"></div>
+                        <div class="bus-v-group">
                             ${genSeat(10, asientosOcupados, miAsiento)}
                             ${genSeat(11, asientosOcupados, miAsiento)}
                         </div>
                     </div>
 
-                    <!-- Columna 5: 4 asientos atrás -->
-                    <div class="bus-column" style="justify-content: space-between; gap: 5px;">
+                    <!-- Fila 5: 4 asientos seguidos -->
+                    <div class="bus-v-row" style="justify-content: space-between;">
                         ${genSeat(12, asientosOcupados, miAsiento)}
                         ${genSeat(13, asientosOcupados, miAsiento)}
                         ${genSeat(14, asientosOcupados, miAsiento)}
@@ -412,24 +419,25 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
                     </div>
                 </div>`;
     } else { // Bus 50
-        html = `<div class="bus-horizontal">
-                        <div class="bus-front">
-                            <div class="steering-wheel"></div>
-                            <div style="width:50px; height:20px; background:#94a3b8; border-radius:10px;"></div>
-                        </div>`;
+        html = `<div class="bus-vertical-container">
+                    <div class="bus-v-front">
+                        <div class="steering-wheel-v"></div>
+                        <div style="width:40px; height:20px; background:#94a3b8; border-radius:10px;"></div>
+                    </div>`;
                         
         for (let i = 1; i <= plazas; i+=4) {
-            let topPair = `<div class="seat-pair">${genSeat(i, asientosOcupados, miAsiento)}${genSeat(i+1, asientosOcupados, miAsiento)}</div>`;
+            let topPair = `<div class="bus-v-group">${genSeat(i, asientosOcupados, miAsiento)}${genSeat(i+1, asientosOcupados, miAsiento)}</div>`;
             let bottomPair = '';
             
             if (i === 49) {
-                bottomPair = `<div style="width: 45px; height: 85px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569; writing-mode: vertical-rl; transform: rotate(180deg);">WC</div>`;
+                bottomPair = `<div style="width: 85px; height: 42px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569;">BAÑO</div>`;
             } else {
-                bottomPair = `<div class="seat-pair">${genSeat(i+2, asientosOcupados, miAsiento)}${genSeat(i+3, asientosOcupados, miAsiento)}</div>`;
+                bottomPair = `<div class="bus-v-group">${genSeat(i+2, asientosOcupados, miAsiento)}${genSeat(i+3, asientosOcupados, miAsiento)}</div>`;
             }
 
-            html += `<div class="bus-column">
+            html += `<div class="bus-v-row">
                         ${topPair}
+                        <div class="bus-v-aisle"></div>
                         ${bottomPair}
                      </div>`;
         }
@@ -439,20 +447,33 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     croquisDiv.innerHTML = html;
 }
 
-function genSeat(numero, ocupados, miAsiento) {
+function genSeat(numero, ocupadosInfo, miAsiento) {
     if(numero > 50 || numero <= 0 || !numero) return '';
     const esMio = (miAsiento == numero.toString());
-    const estaOcupado = ocupados.includes(numero.toString());
+    const ocupante = ocupadosInfo[numero.toString()];
     
-    let clase = 'seat';
-    if(esMio) clase += ' selected';
-    else if(estaOcupado) clase += ' occupied';
+    let clase = 'seat-v';
+    let ocupanteNombre = '';
+    
+    if(esMio) {
+        clase += ' selected';
+    }
+    else if(ocupante) {
+        ocupanteNombre = ocupante.nombre_completo;
+        if(ocupante.rol === 'admin' || ocupante.rol === 'superadmin') {
+            clase += ' occupied-red';
+        } else {
+            clase += ' occupied-blue';
+        }
+    }
 
-    return `<div class="${clase}" onclick="selectSeat(this, ${numero})"><span>${numero}</span></div>`;
+    return `<div class="${clase}" onclick="selectSeat(this, ${numero}, '${ocupanteNombre}')"><span>${numero}</span></div>`;
 }
 
-function selectSeat(seatElement, numero) {
-    if (seatElement.classList.contains('occupied')) return Swal.fire('Ocupado', 'Este asiento ya fue tomado.', 'warning');
+function selectSeat(seatElement, numero, ocupanteNombre) {
+    if (seatElement.classList.contains('occupied-blue') || seatElement.classList.contains('occupied-red')) {
+        return Swal.fire('Ocupado', `Este asiento ya fue tomado por: <b>${ocupanteNombre}</b>`, 'warning');
+    }
     
     if (seatElement.classList.contains('selected')) {
         Swal.fire({
@@ -511,6 +532,12 @@ function selectSeat(seatElement, numero) {
     }).then(async (res) => {
         if(res.isConfirmed) {
             try {
+                // Doble check para prevenir colisión (race condition)
+                const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', session.transporte_id).eq('asiento', numero.toString()).limit(1);
+                if (check && check.length > 0) {
+                    return Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                }
+
                 await window.db.from('usuarios').update({
                     asiento: numero.toString(),
                     estado_viaje: 'asiento_elegido',

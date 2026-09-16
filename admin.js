@@ -79,7 +79,7 @@ async function loadAdminDashboard() {
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
                     // Si el superadmin reinicia o edita el viaje, recargar
-                    window.location.reload();
+                    loadAdminDashboard();
                 })
                 .subscribe();
         }
@@ -373,52 +373,60 @@ async function renderAdminCroquis() {
 
         if (plazas === 2) {
             html = `
-                <div style="display:flex; justify-content:center; width:100%; margin-top:10px;">
-                    <div style="display: flex; flex-direction: row-reverse; align-items: center; background: #cbd5e1; padding: 20px 40px; border-radius: 80px 20px 20px 80px; border: 5px solid #94a3b8; gap: 15px; box-shadow: inset 0 0 15px rgba(0,0,0,0.15);">
-                        <div style="display: flex; flex-direction: column; align-items: center; margin-left: 10px;">
-                            <div style="width: 20px; height: 70px; background: #1e293b; border-radius: 10px; position:relative;">
-                                <div style="position:absolute; right:-12px; top:50%; transform:translateY(-50%); width:12px; height:25px; background:#fde047; border-radius:50%; box-shadow: 0 0 10px #fde047;"></div>
-                            </div>
-                        </div>
-                        <div style="display: flex; gap: 8px;">
+                <div class="bus-vertical-container" style="max-width: 150px;">
+                    <div class="bus-v-front">
+                        <div class="steering-wheel-v"></div>
+                    </div>
+                    <div class="bus-v-row" style="justify-content: center;">
+                        <div class="bus-v-group">
                             ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                         </div>
-                        <div style="width: 30px; height: 50px; background: #334155; border-radius: 10px; margin-right: 10px;"></div>
                     </div>
                 </div>
             `;
         } else if (plazas === 15) {
-            html = `<div class="bus-horizontal" style="border-radius: 40px; padding: 20px;">
-                        <div class="bus-front" style="justify-content: space-between; height: 180px; border:none; padding-left:10px;">
-                            <div class="seat-pair">
+            html = `<div class="bus-vertical-container">
+                        <!-- Fila 1: Volante y Copilotos -->
+                        <div class="bus-v-front">
+                            <div class="steering-wheel-v"></div>
+                            <div class="bus-v-group">
                                 ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                                 ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             </div>
-                            <div class="steering-wheel"></div>
                         </div>
-                        <div class="bus-column" style="justify-content: flex-end; gap: 0;">
-                            <div class="seat-pair">
+
+                        <!-- Fila 2: 3 asientos -->
+                        <div class="bus-v-row">
+                            <div class="bus-v-group" style="width: 100%; justify-content: flex-end;">
                                 ${genAdminSeat(3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                                 ${genAdminSeat(4, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                                 ${genAdminSeat(5, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             </div>
                         </div>
-                        <div class="bus-column" style="justify-content: space-between;">
+
+                        <!-- Fila 3: 1, pasillo, 2 -->
+                        <div class="bus-v-row">
                             ${genAdminSeat(6, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            <div class="seat-pair">
+                            <div class="bus-v-aisle"></div>
+                            <div class="bus-v-group">
                                 ${genAdminSeat(7, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                                 ${genAdminSeat(8, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             </div>
                         </div>
-                        <div class="bus-column" style="justify-content: space-between;">
+
+                        <!-- Fila 4: 1, pasillo, 2 -->
+                        <div class="bus-v-row">
                             ${genAdminSeat(9, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            <div class="seat-pair">
+                            <div class="bus-v-aisle"></div>
+                            <div class="bus-v-group">
                                 ${genAdminSeat(10, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                                 ${genAdminSeat(11, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             </div>
                         </div>
-                        <div class="bus-column" style="justify-content: space-between; gap: 5px;">
+
+                        <!-- Fila 5: 4 asientos seguidos -->
+                        <div class="bus-v-row" style="justify-content: space-between;">
                             ${genAdminSeat(12, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             ${genAdminSeat(13, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
                             ${genAdminSeat(14, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
@@ -426,24 +434,25 @@ async function renderAdminCroquis() {
                         </div>
                     </div>`;
         } else {
-            html = `<div class="bus-horizontal">
-                            <div class="bus-front">
-                                <div class="steering-wheel"></div>
-                                <div style="width:50px; height:20px; background:#94a3b8; border-radius:10px;"></div>
+            html = `<div class="bus-vertical-container">
+                            <div class="bus-v-front">
+                                <div class="steering-wheel-v"></div>
+                                <div style="width:40px; height:20px; background:#94a3b8; border-radius:10px;"></div>
                             </div>`;
                             
             for (let i = 1; i <= plazas; i+=4) {
-                let topPair = `<div class="seat-pair">${genAdminSeat(i, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
+                let topPair = `<div class="bus-v-group">${genAdminSeat(i, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
                 let bottomPair = '';
                 
                 if (i === 49) {
-                    bottomPair = `<div style="width: 45px; height: 85px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569; writing-mode: vertical-rl; transform: rotate(180deg);">WC</div>`;
+                    bottomPair = `<div style="width: 85px; height: 42px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569;">BAÑO</div>`;
                 } else {
-                    bottomPair = `<div class="seat-pair">${genAdminSeat(i+2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
+                    bottomPair = `<div class="bus-v-group">${genAdminSeat(i+2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
                 }
 
-                html += `<div class="bus-column">
+                html += `<div class="bus-v-row">
                             ${topPair}
+                            <div class="bus-v-aisle"></div>
                             ${bottomPair}
                          </div>`;
             }
@@ -460,15 +469,16 @@ function genAdminSeat(numero, ocupadosInfo, miAsiento, viajeId, transporteId) {
     const esMio = (miAsiento == numero.toString() && session.transporte_id == transporteId);
     const usuarioAsiento = ocupadosInfo[numero.toString()];
     
-    let clase = 'seat';
+    let clase = 'seat-v';
     let onclickFn = `seleccionarAsientoVIP(${numero}, '${viajeId}', '${transporteId}')`;
     
     if(esMio) {
         clase += ' selected';
     }
     else if(usuarioAsiento) {
-        clase += ' occupied';
         const u = usuarioAsiento;
+        if(u.rol === 'admin' || u.rol === 'superadmin') clase += ' occupied-red';
+        else clase += ' occupied-blue';
         const foto = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
         onclickFn = `verDetalleAsiento('${u.nombre_completo}', '${foto}', '${u.dni}', '${u.fecha_reserva}')`;
     }
@@ -523,6 +533,12 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
     }).then(async (res) => {
         if(res.isConfirmed) {
             try {
+                // Doble check para colisiones
+                const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', transporteId).eq('asiento', numero.toString()).limit(1);
+                if (check && check.length > 0) {
+                    return Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                }
+
                 await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                 session.asiento = numero.toString();
                 localStorage.setItem('omni_user', JSON.stringify(session));

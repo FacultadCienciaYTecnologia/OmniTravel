@@ -449,3 +449,81 @@ div:where(.swal2-container) button:where(.swal2-styled).swal2-cancel:hover {
     .trip-item { flex-direction: column; align-items: flex-start; gap: 1rem; }
     .btn-group { width: 100%; justify-content: flex-start; }
 }
+
+/* ====== DISEÑO VERTICAL DE AUTOBÚS ====== */
+.bus-vertical-container {
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto;
+    padding: 15px;
+    background: #cbd5e1;
+    border-radius: 60px 60px 20px 20px;
+    border: 5px solid #94a3b8;
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+}
+.bus-v-front {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-bottom: 2px dashed #94a3b8;
+    padding-bottom: 15px;
+}
+.steering-wheel-v {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    border: 5px solid #475569;
+    background: #cbd5e1;
+    position: relative;
+}
+.steering-wheel-v::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #475569;
+    transform: translateY(-50%);
+}
+.bus-v-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+.bus-v-aisle { flex-grow: 1; min-width: 25px; }
+.bus-v-group { display: flex; gap: 6px; }
+.seat-v {
+    width: 42px;
+    height: 45px;
+    background: #cbd5e1; /* Gris (Vacío) */
+    border: 2px solid #94a3b8;
+    border-radius: 8px 8px 3px 3px;
+    position: relative;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #475569;
+    text-shadow: none;
+    box-shadow: inset 0 4px 0 rgba(0,0,0,0.1); 
+    transition: var(--transition);
+}
+.seat-v:hover:not(.occupied-blue):not(.occupied-red) { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(148, 163, 184, 0.4); }
+
+.seat-v.selected { background: var(--success); border-color: #15803d; color: #fff; box-shadow: inset 0 4px 0 rgba(0,0,0,0.2); text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+/* Usuario Normal (Estudiante) */
+.seat-v.occupied-blue { background: #38bdf8; border-color: #0284c7; color: #fff; box-shadow: inset 0 4px 0 rgba(0,0,0,0.2); cursor: not-allowed; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.seat-v.occupied-blue:hover { transform: none; box-shadow: inset 0 4px 0 rgba(0,0,0,0.2); }
+
+/* Admin / Superadmin */
+.seat-v.occupied-red { background: #f87171; border-color: #b91c1c; color: #fff; box-shadow: inset 0 4px 0 rgba(0,0,0,0.2); cursor: not-allowed; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.seat-v.occupied-red:hover { transform: none; box-shadow: inset 0 4px 0 rgba(0,0,0,0.2); }
