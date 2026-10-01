@@ -26,8 +26,20 @@ async function loadEstudianteDashboard(skipFetch = false) {
     try {
         if(!skipFetch) {
             // Refrescar datos del usuario desde la BD
-            const { data: user } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
+            const { data: user, error } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
+            if (error || !user) {
+                // El usuario fue eliminado
+                localStorage.removeItem('omni_user');
+                window.location.href = 'index.html';
+                return;
+            }
             if(user) {
+                if(user.rol !== 'estudiante') {
+                    Object.assign(session, user);
+                    localStorage.setItem('omni_user', JSON.stringify(session));
+                    window.location.href = 'index.html';
+                    return;
+                }
                 Object.assign(session, user);
                 localStorage.setItem('omni_user', JSON.stringify(session));
             }
@@ -63,6 +75,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             // == VISTA DE VIAJE ACTIVO ==
             document.getElementById('panel-lobby').style.display = 'none';
             document.getElementById('panel-viaje-activo').style.display = 'block';
+            setTimeout(() => { if(map) map.invalidateSize(); }, 300); // Fix para mapa dañado/gris al cambiar display
 
             // Obtener datos del viaje específico al que se anotó
             const { data: viaje } = await window.db.from('viajes').select('*').eq('id', session.viaje_id).single();
@@ -254,41 +267,25 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 });
             }
 
-            // Lógica de parada intermitente (punto a segmento)
+            // Lógica de parada intermitente libre (click en el mapa)
             map.off('click');
             map.on('click', async function(e) {
-                if (!polylineRuta || !polylineRuta._selectedRoute) return;
-                
-                const routeCoords = polylineRuta._selectedRoute.coordinates; 
-                if (!routeCoords) return;
-
-                let minDistance = Infinity;
-                routeCoords.forEach(coord => {
-                    const d = map.distance(e.latlng, coord);
-                    if(d < minDistance) minDistance = d;
+                const { isConfirmed } = await Swal.fire({
+                    title: 'Parada Personalizada',
+                    text: 'Has seleccionado un punto en el mapa. ¿Deseas solicitar subirte aquí?',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Sí, guardar parada'
                 });
 
-                // 30 metros de tolerancia en la carretera
-                if (minDistance <= 30) {
-                    const { isConfirmed } = await Swal.fire({
-                        title: 'Parada Intermitente',
-                        text: 'Has seleccionado un punto en la ruta. ¿Deseas solicitar subirte aquí?',
-                        icon: 'question',
-                        showCancelButton: true,
-                        confirmButtonText: 'Sí, guardar parada'
-                    });
-
-                    if (isConfirmed) {
-                        if(window.markerIntermitente) map.removeLayer(window.markerIntermitente);
-                        window.markerIntermitente = L.marker(e.latlng, { icon: L.divIcon({className: 'custom-div-icon', html: "<div style='background:#fde047; width:15px; height:15px; border-radius:50%; border:2px solid #b45309;'></div>"}) }).addTo(map).bindPopup("Tu parada intermitente").openPopup();
-                        
-                        const select = document.getElementById('parada-select');
-                        const val = JSON.stringify({lat: e.latlng.lat, lng: e.latlng.lng});
-                        select.innerHTML += `<option value='${val}' selected>Parada Intermitente Solicitada</option>`;
-                        Swal.fire('Parada Seleccionada', 'Recuerda dar clic en "Confirmar Parada".', 'success');
-                    }
-                } else {
-                    Swal.fire('Fuera de Ruta', 'Debes hacer clic directamente en la línea azul por donde pasará el transporte.', 'warning');
+                if (isConfirmed) {
+                    if(window.markerIntermitente) map.removeLayer(window.markerIntermitente);
+                    window.markerIntermitente = L.marker(e.latlng, { icon: L.divIcon({className: 'custom-div-icon', html: "<div style='background:#fde047; width:15px; height:15px; border-radius:50%; border:2px solid #b45309;'></div>"}) }).addTo(map).bindPopup("Tu parada intermitente").openPopup();
+                    
+                    const select = document.getElementById('parada-select');
+                    const val = JSON.stringify({lat: e.latlng.lat, lng: e.latlng.lng});
+                    select.innerHTML += `<option value='${val}' selected>Punto Seleccionado en Mapa</option>`;
+                    Swal.fire('Parada Seleccionada', 'Recuerda dar clic en "Confirmar Parada".', 'success');
                 }
             });
         }
@@ -306,14 +303,34 @@ async function loadEstudianteDashboard(skipFetch = false) {
         if (!window.estudianteChannel) {
             window.estudianteChannel = window.db.channel('estudiante-realtime')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
-                    // Si mi propio usuario fue modificado por el admin/superadmin (ej. asignación de vehículo)
+                    // Si el usuario fue eliminado
+                    if (payload.eventType === 'DELETE' && payload.old && payload.old.id === session.id) {
+                        localStorage.removeItem('omni_user');
+                        Swal.fire('Cuenta Eliminada', 'Tu cuenta ya no está disponible. Serás redirigido.', 'error').then(() => {
+                            window.location.href = 'index.html';
+                        });
+                        return;
+                    }
+                    
+                    // Si mi propio usuario fue modificado por el admin/superadmin (ej. asignación de vehículo o cambio de rol)
                     if (payload.new && payload.new.id === session.id) {
+                        if(payload.new.rol !== 'estudiante') {
+                            Object.assign(session, payload.new);
+                            localStorage.setItem('omni_user', JSON.stringify(session));
+                            Swal.fire('Rol Modificado', 'Tu rol ha sido cambiado. Serás redirigido.', 'info').then(() => {
+                                window.location.href = 'index.html';
+                            });
+                            return;
+                        }
                         Object.assign(session, payload.new);
                         localStorage.setItem('omni_user', JSON.stringify(session));
+                        window.croquisRendered = false;
+                        lastOccupiedStr = "";
                         loadEstudianteDashboard(true);
-                    } 
+                    }  
                     // Si alguien más tomó asiento o el admin asignó a alguien
                     else if(window.currentViajeId && session.transporte_id) {
+                        window.croquisRendered = false;
                         lastOccupiedStr = ""; // Forzar recargo
                         renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
                         cargarMiembros(session.transporte_id);
@@ -730,7 +747,7 @@ async function cancelarAsistencia() {
 // ====== PARADAS INTERMITENTES ======
 async function solicitarParadaIntermitente() {
     if (!navigator.geolocation) return Swal.fire('Error', 'Necesitas GPS activo para solicitar parada.', 'error');
-    if (!window.currentViajeId) return;
+    if (!window.currentViajeId) return Swal.fire('Atención', 'Aún no se ha cargado la ruta completa de tu viaje.', 'warning');
 
     Swal.fire({
         title: '¿Solicitar Parada Intermitente Aquí?',

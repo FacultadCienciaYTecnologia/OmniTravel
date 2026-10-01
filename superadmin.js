@@ -37,6 +37,24 @@ menuItems.forEach(item => {
 // ====== CARGA DE DATOS INICIALES ======
 async function loadDashboard() {
     try {
+        // Refrescar perfil para verificar si le quitaron el rol
+        const { data: me, error } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
+        if (error || !me) {
+            localStorage.removeItem('omni_user');
+            window.location.href = 'index.html';
+            return;
+        }
+        if(me) {
+            if(me.rol !== 'superadmin') {
+                Object.assign(session, me);
+                localStorage.setItem('omni_user', JSON.stringify(session));
+                window.location.href = 'index.html';
+                return;
+            }
+            Object.assign(session, me);
+            localStorage.setItem('omni_user', JSON.stringify(session));
+        }
+
         // Usuarios
         const { data: users } = await window.db.from('usuarios').select('id, estado_aprobacion, rol').neq('rol', 'superadmin');
         const aprobados = users.filter(u => u.estado_aprobacion === 'aprobado');
@@ -65,11 +83,61 @@ async function loadDashboard() {
         
         cargarSelectAdminVehiculos(transportes || []);
         
-        // ====== SUSCRIPCIONES REALTIME ======
+        // ====== SUSCRIPCIONES REALTIME SUPERADMIN ======
         if(!window.superadminChannel) {
             window.superadminChannel = window.db.channel('superadmin-realtime')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, () => {
-                    loadDashboard(); // Recargar usuarios pendientes y roles
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+                    // Si el usuario fue eliminado
+                    if (payload.eventType === 'DELETE' && payload.old && payload.old.id === session.id) {
+                        localStorage.removeItem('omni_user');
+                        Swal.fire('Cuenta Eliminada', 'Tu cuenta ya no está disponible. Serás redirigido.', 'error').then(() => {
+                            window.location.href = 'index.html';
+                        });
+                        return;
+                    }
+
+                    if (payload.new && payload.new.id === session.id) {
+                        if(payload.new.rol !== 'superadmin') {
+                            Object.assign(session, payload.new);
+                            localStorage.setItem('omni_user', JSON.stringify(session));
+                            Swal.fire('Rol Modificado', 'Has dejado de ser Superadmin. Serás redirigido.', 'info').then(() => {
+                                window.location.href = 'index.html';
+                            });
+                            return;
+                        }
+                    }
+
+                    // Recargar silenciosamente sin SweetAlerts
+                    window.db.from('usuarios').select('id, estado_aprobacion, rol').neq('rol', 'superadmin').then(({ data: users }) => {
+                        if(users) {
+                            const aprobados = users.filter(u => u.estado_aprobacion === 'aprobado');
+                            const pendientes = users.filter(u => u.estado_aprobacion === 'pendiente');
+                            document.getElementById('stat-usuarios').innerText = aprobados.length;
+                            if (pendientes.length > 0) {
+                                document.getElementById('badge-pendientes').style.display = 'inline';
+                                document.getElementById('badge-pendientes').innerText = pendientes.length;
+                            } else {
+                                document.getElementById('badge-pendientes').style.display = 'none';
+                            }
+                            renderPendientes(pendientes); 
+                            renderRoles(aprobados);
+                        }
+                    });
+                    
+                    // Actualizar croquis en tiempo real si el superadmin lo está viendo
+                    if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
+                        lastAdminOccupiedStr = "";
+                        renderAdminCroquis();
+                    }
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
+                    loadDashboard(); // Refresca lista de viajes
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
+                    // Refrescar mapa si estamos viendo la ruta activa
+                    if(window.currentViajeMonitoreo) {
+                        verRutaActiva(window.currentViajeMonitoreo);
+                    }
                 })
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
                     const p = payload.new;
@@ -1060,25 +1128,3 @@ function cargarSelectAdminVehiculos(transportesArray) {
 
 // Inicializar
 loadDashboard();
-
-// ====== SUSCRIPCIONES REALTIME ======
-if (!window.superadminChannel) {
-    window.superadminChannel = window.db.channel('superadmin-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
-            // Actualizar tablas de usuarios y croquis si hay admin seleccionado
-            loadDashboard(); // Refresca stats y pendientes
-            if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
-                renderAdminCroquis();
-            }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
-            loadDashboard(); // Refresca lista de viajes
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
-            // Refrescar mapa si estamos viendo la ruta activa
-            if(window.currentViajeMonitoreo) {
-                verRutaActiva(window.currentViajeMonitoreo);
-            }
-        })
-        .subscribe();
-}

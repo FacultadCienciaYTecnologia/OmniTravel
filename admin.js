@@ -26,6 +26,24 @@ let transporteIdActual = null;
 // ====== CARGA INICIAL ======
 async function loadAdminDashboard() {
     try {
+        // Refrescar perfil para verificar cambios de rol
+        const { data: user, error } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
+        if (error || !user) {
+            // El usuario fue eliminado
+            localStorage.removeItem('omni_user');
+            window.location.href = 'index.html';
+            return;
+        }
+        if(user) {
+            if(user.rol !== 'admin') {
+                Object.assign(session, user);
+                localStorage.setItem('omni_user', JSON.stringify(session));
+                window.location.href = 'index.html';
+                return;
+            }
+            Object.assign(session, user);
+            localStorage.setItem('omni_user', JSON.stringify(session));
+        }
         // Encontrar un transporte asignado a este viaje.
         const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, ruta').in('estado', ['preparacion', 'en_ruta', 'en_ruta_ida', 'espera_vuelta', 'en_ruta_vuelta']).limit(1);
         
@@ -159,6 +177,26 @@ async function loadAdminDashboard() {
         if (!window.adminChannel) {
             window.adminChannel = window.db.channel('admin-realtime')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+                    // Si el usuario fue eliminado
+                    if (payload.eventType === 'DELETE' && payload.old && payload.old.id === session.id) {
+                        localStorage.removeItem('omni_user');
+                        Swal.fire('Cuenta Eliminada', 'Tu cuenta ya no está disponible. Serás redirigido.', 'error').then(() => {
+                            window.location.href = 'index.html';
+                        });
+                        return;
+                    }
+
+                    if (payload.new && payload.new.id === session.id) {
+                        if(payload.new.rol !== 'admin') {
+                            Object.assign(session, payload.new);
+                            localStorage.setItem('omni_user', JSON.stringify(session));
+                            Swal.fire('Rol Modificado', 'Tu rol ha sido cambiado. Serás redirigido.', 'info').then(() => {
+                                window.location.href = 'index.html';
+                            });
+                            return;
+                        }
+                    }
+
                     if(viajeIdActual) {
                         lastAdminOccupiedStr = "";
                         cargarManifiesto();
@@ -226,9 +264,28 @@ async function cargarManifiesto() {
         }
 
         let paradaNombre = 'Inicio / Por defecto';
-        if(p.parada_id && window.rutaActual && window.rutaActual[parseInt(p.parada_id)]) {
-            const rObj = window.rutaActual[parseInt(p.parada_id)];
-            paradaNombre = rObj.nombre || `Parada ${parseInt(p.parada_id) + 1}`;
+        if (p.parada_id) {
+            try {
+                // p.parada_id ahora es un string JSON: '{"lat":13.0,"lng":-89.0}'
+                const coords = JSON.parse(p.parada_id);
+                // Buscar si coincide con alguna parada definida en la ruta
+                let indexRuta = -1;
+                if(window.rutaActual) {
+                    indexRuta = window.rutaActual.findIndex(r => r.lat === coords.lat && r.lng === coords.lng);
+                }
+                
+                if (indexRuta !== -1) {
+                    paradaNombre = window.rutaActual[indexRuta].nombre || `Parada ${indexRuta + 1}`;
+                } else {
+                    paradaNombre = `Punto Personalizado (Lat: ${coords.lat.toFixed(4)})`;
+                }
+            } catch(e) {
+                // Fallback por si hay datos viejos que usaban índices (0, 1, 2...)
+                if(window.rutaActual && window.rutaActual[parseInt(p.parada_id)]) {
+                    const rObj = window.rutaActual[parseInt(p.parada_id)];
+                    paradaNombre = rObj.nombre || `Parada ${parseInt(p.parada_id) + 1}`;
+                }
+            }
         }
 
         const phoneLink = p.telefono ? `<a href="tel:${p.telefono}" class="btn btn-outline" style="padding:2px 5px; font-size:0.75rem; border-color:var(--accent); color:var(--accent);">📞 Llamar</a>` : '-';
@@ -253,6 +310,30 @@ async function cargarManifiesto() {
     });
 
     document.getElementById('count-abordo').innerText = `A bordo: ${abordoCount} / ${pasajeros.length}`;
+    
+    // Dibujar los puntos personalizados de los estudiantes en el mapa del Chofer
+    if (window.customParadaMarkers) {
+        window.customParadaMarkers.forEach(m => map.removeLayer(m));
+    }
+    window.customParadaMarkers = [];
+    
+    pasajeros.forEach(p => {
+        if(p.parada_id) {
+            try {
+                const coords = JSON.parse(p.parada_id);
+                if(window.rutaActual) {
+                    const indexRuta = window.rutaActual.findIndex(r => r.lat === coords.lat && r.lng === coords.lng);
+                    if(indexRuta === -1) {
+                        // Es un punto personalizado, dibujarlo!
+                        const marker = L.marker([coords.lat, coords.lng], { 
+                            icon: L.divIcon({className: 'custom-div-icon', html: "<div style='background:#fde047; width:15px; height:15px; border-radius:50%; border:2px solid #b45309;'></div>"}) 
+                        }).addTo(map).bindPopup(`<b>Punto de Recogida</b><br>${p.nombre_completo}`);
+                        window.customParadaMarkers.push(marker);
+                    }
+                }
+            } catch(e) {}
+        }
+    });
 }
 
 async function marcarAbordo(btn, id, estaAbordo) {
