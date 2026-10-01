@@ -9,6 +9,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Face API -->
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- CryptoJS para cifrar contraseñas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     
     <style>
         .login-modes { display: flex; border: 1px solid var(--card-border); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 1.5rem; }
@@ -117,7 +119,8 @@
             btn.innerText = "Verificando...";
 
             const email = document.getElementById('email').value.trim();
-            const password = document.getElementById('password').value;
+            const passwordStr = document.getElementById('password').value;
+            const hashedPassword = CryptoJS.SHA256(passwordStr).toString();
 
             try {
                 // Buscar por email o DNI
@@ -125,7 +128,7 @@
                     .from('usuarios')
                     .select('*')
                     .or(`email.eq.${email},dni.eq.${email}`)
-                    .eq('password', password)
+                    .eq('password', hashedPassword)
                     .maybeSingle();
 
                 if (error) throw error;

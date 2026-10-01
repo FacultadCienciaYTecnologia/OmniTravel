@@ -162,40 +162,37 @@
 
     <div class="container" style="padding-top: 0;">
 
-        <div class="trip-header">
-            <div>
-                <h2 id="v-titulo">Cargando...</h2>
-                <p id="v-fecha">Buscando viaje programado...</p>
-                <p><strong id="v-transporte"></strong></p>
-                <p id="v-countdown" style="font-weight:bold; font-size: 1.1rem; margin-top:10px; color:#fde047;"></p>
+        <!-- LOBBY DE VIAJES (Cuando no está inscrito) -->
+        <div id="panel-lobby" style="display:none;">
+            <div class="card mb-3 text-center">
+                <h3 class="mb-2">Viajes Disponibles</h3>
+                <p class="text-muted">Selecciona el viaje al que deseas inscribirte. <strong>Nota:</strong> Una vez inscrito, no podrás cambiarte.</p>
             </div>
-            <div>
-                <span class="badge" id="badge-estado"
-                    style="background: rgba(255,255,255,0.2); color:white; font-size:1rem; padding: 8px 15px;">Inscripciones
-                    Cerradas</span>
+            <div id="lista-viajes-lobby" class="grid grid-2">
+                <!-- Se llenará con JS -->
             </div>
         </div>
 
-        <div id="panel-anotarse" class="card text-center mb-3" style="display:none;">
-            <h3 class="mb-2">¡Inscripciones Abiertas!</h3>
-            <p class="text-muted mb-3">Hay un nuevo viaje programado. Regístrate para que el administrador te asigne un
-                vehículo.</p>
-            <button class="btn btn-success btn-auto" onclick="anotarseViaje()">Quiero ir a este Viaje</button>
-        </div>
-
-        <div id="panel-espera" class="card text-center mb-3"
-            style="display:none; background: #fffbeb; border-color: #fde68a;">
-            <h3 class="mb-2" style="color:#b45309;">Estado: Esperando Asignación</h3>
-            <p style="color:#92400e;" id="espera-texto">Estás anotado. Espera a que el administrador asigne los
-                transportes.</p>
-        </div>
-
-        <div id="panel-croquis" style="display:none;">
-            <div class="card mb-3">
-                <h3 class="mb-2">Directorio del Vehículo</h3>
-                <p class="text-muted mb-2">Miembros asignados a tu mismo transporte.</p>
-                <div id="lista-miembros" style="display: flex; gap:10px; flex-wrap: wrap;">
-                    <!-- Burbujas de fotos -->
+        <!-- PANEL DE VIAJE ACTIVO -->
+        <div id="panel-viaje-activo" style="display:none;">
+            <div class="trip-header">
+                <div>
+                    <h2 id="v-titulo" style="word-break: break-word; overflow-wrap: break-word;">Cargando...</h2>
+                    <p id="v-fecha">Buscando información...</p>
+                    <div style="display:flex; align-items:center; gap:15px; margin-top:10px;">
+                        <img id="v-transporte-img" src="" style="width:100px; height:60px; object-fit:cover; border-radius:5px; border:2px solid rgba(255,255,255,0.3); display:none;">
+                        <div>
+                            <p><strong id="v-transporte"></strong></p>
+                            <p id="v-countdown" style="font-weight:bold; font-size: 1.1rem; margin-top:5px; color:#fde047;"></p>
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <span class="badge" id="badge-estado" style="background: rgba(255,255,255,0.2); color:white; font-size:1rem; padding: 8px 15px;">Inscrito</span>
+                    <div id="panel-asistencia" style="margin-top: 15px; display:none;">
+                        <button id="btn-asistencia" class="btn" style="background: var(--success); color:white; width: 100%; border: 2px solid white;" onclick="marcarAsistencia()">✔ Ya estoy en la unidad</button>
+                        <button id="btn-cancelar-asistencia" class="btn" style="background: var(--error); color:white; width: 100%; border: 2px solid white; display:none; margin-top:5px;" onclick="cancelarAsistencia()">✖ Cancelar Asistencia</button>
+                    </div>
                 </div>
             </div>
 
@@ -207,6 +204,17 @@
                     <!-- Burbujas de fotos -->
                 </div>
             </div>
+
+        <div id="panel-croquis" style="display:none;">
+            <div class="card mb-3">
+                <h3 class="mb-2">Directorio del Vehículo</h3>
+                <p class="text-muted mb-2">Miembros asignados a tu mismo transporte.</p>
+                <div id="lista-miembros" style="display: flex; gap:10px; flex-wrap: wrap;">
+                    <!-- Burbujas de fotos -->
+                </div>
+            </div>
+
+
 
             <div class="grid grid-2 mb-3">
                 <!-- SELECCIÓN DE PARADA -->
@@ -247,14 +255,21 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </div> <!-- Fin panel-croquis -->
 
         <!-- MAPA GPS EN VIVO -->
-        <div class="card mt-3">
-            <h3 class="mb-2">Ruta y GPS en Vivo</h3>
-            <p class="text-muted mb-2">Aquí podrás ver dónde viene tu transporte en tiempo real el día del viaje.</p>
+        <div id="panel-mapa" class="card mt-3">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div>
+                    <h3 class="mb-2">Ruta y GPS en Vivo</h3>
+                    <p class="text-muted mb-2">Sigue el bus en tiempo real.</p>
+                </div>
+                <button class="btn" style="background:#f59e0b; color:white; font-size:0.75rem; padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" onclick="solicitarParadaIntermitente()">📍 Parada Intermitente</button>
+            </div>
             <div id="student-map"></div>
         </div>
+
+        </div> <!-- Fin panel-viaje-activo -->
 
     </div>
 

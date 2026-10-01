@@ -122,7 +122,6 @@
                 <div class="menu-item" data-target="gestion-usuarios">Gestión de Roles</div>
                 <div class="menu-item" data-target="viajes">Crear Viaje</div>
                 <div class="menu-item" data-target="gestion-viajes">Gestión de Viajes</div>
-                <div class="menu-item" data-target="transportes">Transportes</div>
                 <div class="menu-item" style="color: var(--error); margin-top: auto;" onclick="logout()">Cerrar Sesión</div>
             </div>
         </div>
@@ -253,9 +252,8 @@
                     
                     <button class="btn btn-success" id="btn-save-viaje">Guardar Viaje y Ruta</button>
                 </div>
-
                 </div>
-            </div>
+
 
             <!-- NUEVA PESTAÑA: GESTIÓN DE VIAJES (LISTA Y CROQUIS) -->
             <div id="gestion-viajes" class="tab-content">
@@ -289,58 +287,49 @@
                 </div>
             </div>
 
-            <div id="transportes" class="tab-content">
-                <div class="card" style="padding: 1.5rem;">
-                    <h3 class="mb-2">Asignar Vehículos a Viajes</h3>
-                    <p class="text-muted mb-3">Asocia topologías de asientos a viajes programados.</p>
+            <!-- MODAL DE TRANSPORTES -->
+            <div id="modal-transportes" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; overflow-y:auto;">
+                <div class="card" style="margin: 5% auto; width: 90%; max-width: 800px; padding: 2rem; position:relative;">
+                    <button class="btn" style="position:absolute; top:15px; right:20px; background:transparent; border:none; font-size:2rem; color:#64748b; padding:0; cursor:pointer;" onclick="cerrarModalTransportes()">&times;</button>
+                    <h2 class="mb-2" id="modal-t-titulo" style="word-break: break-word; overflow-wrap: break-word; padding-right:30px;">Transportes del Viaje</h2>
+                    <p class="text-muted mb-3">Añade vehículos, sube fotos y asigna a los alumnos anotados.</p>
                     
-                    <form id="form-transporte" class="mb-3" style="background: #f8fafc; padding:1.5rem; border-radius:var(--radius-md); border: 1px solid var(--card-border);">
-                        <div>
-                            <label>Seleccionar Viaje</label>
-                            <select id="t-viaje-select" required>
-                                <option value="">Cargando viajes...</option>
-                            </select>
-                        </div>
-                        
-                        <label class="mt-3">Topología del Vehículo (Croquis)</label>
-                        <div class="topology-select" id="t-topologia">
-                            <div class="topo-btn active" data-tipo="bus_50">Autobús (50 Plazas)</div>
-                            <div class="topo-btn" data-tipo="microbus_15">Microbús (15 Plazas)</div>
-                            <div class="topo-btn" data-tipo="moto">Motocicleta (Sin Asientos)</div>
-                        </div>
-                        
-                        <button type="submit" class="btn mt-2">Agregar Vehículo</button>
-                    </form>
+                    <!-- CREAR TRANSPORTE -->
+                    <div style="background: #f8fafc; padding:1.5rem; border-radius:var(--radius-md); border: 1px solid var(--card-border); margin-bottom:20px;">
+                        <h4 class="mb-2">Añadir Nuevo Transporte</h4>
+                        <form id="form-transporte" class="grid grid-2">
+                            <input type="hidden" id="t-viaje-id">
+                            <input type="hidden" id="t-imagen">
+                            <div>
+                                <label>Topología del Vehículo</label>
+                                <select id="t-topologia-select" required style="width:100%; padding:8px;">
+                                    <option value="bus_50">Autobús (50 Plazas)</option>
+                                    <option value="microbus_15">Microbús (15 Plazas)</option>
+                                    <option value="moto">Motocicleta</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Foto del Vehículo (Opcional)</label>
+                                <input type="file" id="t-file-img" accept="image/*" style="width:100%; padding:8px; border: 1px solid var(--card-border); border-radius: var(--radius-sm); background: #fff;">
+                            </div>
+                            <div>
+                                <label>Chofer Asignado (Admin)</label>
+                                <select id="t-admin-select" style="width:100%; padding:8px;" required>
+                                    <option value="">Seleccione un administrador...</option>
+                                </select>
+                            </div>
+                            <div style="grid-column: 1 / -1;">
+                                <button type="submit" class="btn btn-primary mt-2">Agregar Vehículo</button>
+                            </div>
+                        </form>
+                    </div>
 
-                    <div id="lista-transportes" class="mb-3">
+                    <hr class="mb-3">
+
+                    <!-- LISTA DE TRANSPORTES Y ASIGNACIÓN -->
+                    <h3 class="mb-2">Vehículos Asignados</h3>
+                    <div id="lista-transportes-modal">
                         <!-- Dinámico -->
-                    </div>
-
-                    <hr>
-                    <h3 class="mb-2">Asignación Manual de Pasajeros</h3>
-                    <p class="text-muted mb-3">Asigna usuarios que se han anotado a un vehículo específico.</p>
-                    <div class="grid grid-2 mb-2">
-                        <div>
-                            <label>Filtro por Viaje</label>
-                            <select id="a-viaje-select" onchange="cargarAnotadosYVehiculos()">
-                                <option value="">Seleccione un viaje...</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="data-table" id="table-asignacion">
-                            <thead>
-                                <tr>
-                                    <th>Foto</th>
-                                    <th>Nombre</th>
-                                    <th>DNI</th>
-                                    <th>Asignar a Vehículo</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td colspan="4" style="text-align:center;">Seleccione un viaje primero.</td></tr>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>

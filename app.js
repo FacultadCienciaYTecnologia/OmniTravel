@@ -398,6 +398,10 @@ if(form3) {
             let dniVal = document.getElementById('r-dni').value.trim();
             if (isMenor && !dniVal) dniVal = `MENOR-${Date.now()}`;
 
+            // Cifrar contraseña con SHA256 antes de enviar a DB
+            const plainPassword = document.getElementById('r-pass').value;
+            const hashedPassword = CryptoJS.SHA256(plainPassword).toString();
+
             // 2. Insertar Usuario
             const datos = {
                 nombre_completo: document.getElementById('r-nombre').value,
@@ -407,7 +411,7 @@ if(form3) {
                 fecha_nacimiento: document.getElementById('r-fecha').value,
                 codigo_pasajero: document.getElementById('r-codigo').value,
                 email: document.getElementById('r-email').value,
-                password: document.getElementById('r-pass').value, // En un entorno de producción, esto iría cifrado
+                password: hashedPassword, // Contraseña cifrada en frontend
                 foto_perfil: publicUrl,
                 face_descriptor: profileDescriptor,
                 departamento: document.getElementById('r-depto').value,

@@ -40,6 +40,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Ocultar el panel flotante de texto de rutas en todos los mapas */
+.leaflet-routing-container {
+    display: none !important;
+}
+
 body {
     font-family: 'Outfit', system-ui, -apple-system, sans-serif;
     background: var(--bg-gradient);

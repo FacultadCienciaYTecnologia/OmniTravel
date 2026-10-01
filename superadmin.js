@@ -65,6 +65,30 @@ async function loadDashboard() {
         
         cargarSelectAdminVehiculos(transportes || []);
         
+        // ====== SUSCRIPCIONES REALTIME ======
+        if(!window.superadminChannel) {
+            window.superadminChannel = window.db.channel('superadmin-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, () => {
+                    loadDashboard(); // Recargar usuarios pendientes y roles
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
+                    const p = payload.new;
+                    Swal.fire({
+                        title: 'Nueva Solicitud de Parada',
+                        text: 'Un estudiante ha solicitado una parada intermitente. ¿Deseas aprobarla?',
+                        icon: 'info',
+                        showCancelButton: true,
+                        confirmButtonText: 'Sí, aprobar',
+                        cancelButtonText: 'Rechazar'
+                    }).then(async (result) => {
+                        const nuevoEstado = result.isConfirmed ? 'aprobada' : 'rechazada';
+                        await window.db.from('paradas_intermitentes').update({estado: nuevoEstado}).eq('id', p.id);
+                        if(result.isConfirmed) Swal.fire('Aprobada', 'Se notificó la parada.', 'success');
+                    });
+                })
+                .subscribe();
+        }
+
     } catch(e) { console.error("Error cargando dashboard", e); }
 }
 
@@ -129,7 +153,7 @@ async function renderRoles() {
                     <select onchange="cambiarRol('${u.id}', this.value)" style="padding:4px; font-size:0.8rem; border-radius:4px; margin-bottom: 5px; width:100%;">
                         <option value="" disabled selected>Cambiar a...</option>
                         <option value="superadmin">Superadmin</option>
-                        <option value="admin">Admin (Chofer)</option>
+                        <option value="admin">Administrador</option>
                         <option value="estudiante">Estudiante</option>
                     </select>
                     <div style="display:flex; gap:5px;">
@@ -191,8 +215,21 @@ function ampliarFoto(src, nombre) {
 
 async function cambiarRol(id, nuevoRol) {
     try {
-        await window.db.from('usuarios').update({ rol: nuevoRol }).eq('id', id);
-        Swal.fire('Actualizado', 'Rol cambiado con éxito.', 'success');
+        Swal.fire({ title: 'Actualizando rol y limpiando viajes...', didOpen: () => Swal.showLoading() });
+        await window.db.from('usuarios').update({ 
+            rol: nuevoRol,
+            viaje_id: null,
+            transporte_id: null,
+            asiento: null,
+            estado_viaje: 'ninguno',
+            parada_id: null,
+            fecha_reserva: null
+        }).eq('id', id);
+        
+        // Failsafe: Si era admin y tenía transportes asignados, liberarlos.
+        await window.db.from('transportes').update({ admin_id: null }).eq('admin_id', id);
+
+        Swal.fire('Actualizado', 'Rol cambiado y asignaciones de viaje limpiadas con éxito.', 'success');
         renderRoles();
     } catch(e) {
         Swal.fire('Error', 'No se pudo cambiar el rol.', 'error');
@@ -262,6 +299,9 @@ let routeControl = L.Routing.control({
     routeWhileDragging: true,
     language: 'es',
     show: false, // Ocultar el panel de instrucciones texto
+    router: L.Routing.osrmv1({
+        serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1'
+    }),
     createMarker: function(i, wp, nWps) {
         const nombre = (wp.options && wp.options.nombre) ? wp.options.nombre : `Parada ${i+1}`;
         const tiempo = (wp.options && wp.options.tiempo) ? `<br>Hora est.: ${wp.options.tiempo}` : '';
@@ -326,7 +366,15 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
 
     const btn = document.getElementById('btn-save-viaje');
     btn.disabled = true;
-    btn.innerText = "Guardando...";
+
+    Swal.fire({
+        title: 'Guardando Viaje...',
+        text: 'Por favor espera',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
 
     try {
         const { error } = await window.db.from('viajes').insert([{
@@ -362,12 +410,8 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
 
 function renderViajes(viajes) {
     const container = document.getElementById('lista-viajes');
-    const selectTransporte = document.getElementById('t-viaje-select');
-    const selectAsignacion = document.getElementById('a-viaje-select');
     
     container.innerHTML = '';
-    selectTransporte.innerHTML = '<option value="">Seleccione un viaje...</option>';
-    if(selectAsignacion) selectAsignacion.innerHTML = '<option value="">Seleccione un viaje...</option>';
     
     if(!viajes || viajes.length === 0) {
         container.innerHTML = '<p class="text-muted">No hay viajes programados.</p>';
@@ -375,11 +419,8 @@ function renderViajes(viajes) {
     }
     
     viajes.forEach(v => {
-        // Dropdown transportes y asignaciones
-        selectTransporte.innerHTML += `<option value="${v.id}">${v.titulo} (${new Date(v.fecha_salida).toLocaleDateString()})</option>`;
-        if(selectAsignacion) selectAsignacion.innerHTML += `<option value="${v.id}">${v.titulo}</option>`;
         
-        // Tarjeta viaje
+        const btnTransportes = `<button class="btn btn-primary btn-auto" onclick="abrirModalTransportes('${v.id}', '${v.titulo}')">🚍 Transportes</button>`;
         const btnInscripcion = v.inscripcion_abierta 
             ? `<button class="btn btn-outline error btn-auto" onclick="toggleInscripcion('${v.id}', false)">Cerrar Inscripción</button>`
             : `<button class="btn btn-success btn-auto" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
@@ -397,7 +438,8 @@ function renderViajes(viajes) {
                     <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
                     <p>Estado: <b>${v.estado.toUpperCase()}</b></p>
                 </div>
-                <div class="btn-group">
+                <div class="btn-group" style="display:flex; gap:5px; flex-wrap:wrap;">
+                    ${btnTransportes}
                     ${btnRestart}
                     ${btnInscripcion}
                     ${btnCroquis}
@@ -499,110 +541,251 @@ async function eliminarViaje(id) {
     }
 }
 
-// ====== TOPOLOGÍAS ======
-let selectedTopo = 'bus_50';
-document.querySelectorAll('.topo-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.topo-btn').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        selectedTopo = e.target.dataset.tipo;
-    });
-});
+// ====== LÓGICA DE TRANSPORTES (MODAL) ======
+async function abrirModalTransportes(viajeId, titulo) {
+    document.getElementById('t-viaje-id').value = viajeId;
+    document.getElementById('modal-t-titulo').innerText = `Transportes: ${titulo}`;
+    
+    await cargarTransportesModal(viajeId);
+    document.getElementById('modal-transportes').style.display = 'block';
+}
+
+function cerrarModalTransportes() {
+    document.getElementById('modal-transportes').style.display = 'none';
+}
 
 document.getElementById('form-transporte').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const viaje_id = document.getElementById('t-viaje-select').value;
-    if(!viaje_id) return Swal.fire('Error', 'Selecciona un viaje.', 'warning');
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true; // Prevenir doble clic
+
+    Swal.fire({
+        title: 'Procesando...',
+        text: 'Subiendo vehículo e imagen, por favor espera...',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+
+    const viajeId = document.getElementById('t-viaje-id').value;
+    const tipo = document.getElementById('t-topologia-select').value;
+    const adminId = document.getElementById('t-admin-select').value;
     
-    try {
-        const { error } = await window.db.from('transportes').insert([{
-            viaje_id,
-            tipo: selectedTopo
-        }]);
-        if(error) throw error;
-        Swal.fire('Guardado', 'Vehículo asignado al viaje.', 'success');
-        loadDashboard();
-    } catch(e) { Swal.fire('Error', 'No se pudo guardar.', 'error'); }
+    const fileInput = document.getElementById('t-file-img');
+    
+    const procesarFormulario = async (imgDataUrl) => {
+        try {
+            const { data: newTransport, error } = await window.db.from('transportes').insert([{
+                viaje_id: viajeId,
+                tipo: tipo,
+                imagen_url: imgDataUrl,
+                admin_id: adminId
+            }]).select().single();
+            if(error) throw error;
+            
+            if (adminId) {
+                await window.db.from('usuarios').update({ transporte_id: newTransport.id, viaje_id: viajeId }).eq('id', adminId);
+            }
+            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Vehículo Agregado', showConfirmButton: false, timer: 1500 });
+            cargarTransportesModal(viajeId);
+            if(fileInput) fileInput.value = '';
+        } catch(err) {
+            Swal.fire('Error', 'No se pudo agregar.', 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    };
+
+    if (fileInput.files && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        // Validar tamaño máximo (ej. 5MB)
+        if(file.size > 5 * 1024 * 1024) {
+            Swal.fire('Archivo muy grande', 'La imagen no debe superar los 5MB.', 'warning');
+            btn.disabled = false;
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            procesarFormulario(evt.target.result);
+        };
+        reader.onerror = function() {
+            Swal.fire('Error', 'No se pudo leer la imagen.', 'error');
+            btn.disabled = false;
+        }
+        reader.readAsDataURL(file);
+    } else {
+        procesarFormulario('');
+    }
 });
 
-// Lógica de Asignación Manual
-async function cargarAnotadosYVehiculos() {
-    const viaje_id = document.getElementById('a-viaje-select').value;
-    const tbody = document.querySelector('#table-asignacion tbody');
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>';
-    
-    if(!viaje_id) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Seleccione un viaje primero.</td></tr>';
-        return;
-    }
+async function cargarTransportesModal(viajeId) {
+    const container = document.getElementById('lista-transportes-modal');
+    container.innerHTML = '<p class="text-center">Cargando...</p>';
     
     try {
         // Traer transportes de este viaje
-        const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viaje_id);
+        const { data: transportes } = await window.db.from('transportes').select('*, admin:usuarios!admin_id(nombre_completo)').eq('viaje_id', viajeId);
+        
+        // Cargar Choferes (Admins) disponibles
+        const { data: allTransportes } = await window.db.from('transportes').select('admin_id');
+        const assignedAdmins = allTransportes ? allTransportes.map(t => t.admin_id) : [];
+        const { data: admins } = await window.db.from('usuarios').select('id, nombre_completo').eq('rol', 'admin');
+        
+        const adminSelect = document.getElementById('t-admin-select');
+        adminSelect.innerHTML = '<option value="">Seleccione un administrador...</option>';
+        if(admins) {
+            admins.forEach(a => {
+                // Solo agregar si no está ya asignado a algún transporte
+                if(!assignedAdmins.includes(a.id)) {
+                    adminSelect.innerHTML += `<option value="${a.id}">${a.nombre_completo}</option>`;
+                }
+            });
+        }
+        
+        // Traer SOLO los alumnos anotados a ESTE viaje
+        const { data: anotados } = await window.db.from('usuarios').select('id, nombre_completo, transporte_id').eq('viaje_id', viajeId).in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
         
         if(!transportes || transportes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--error);">Este viaje aún no tiene vehículos asignados.</td></tr>';
+            container.innerHTML = '<p class="text-muted">Aún no hay transportes asignados a este viaje.</p>';
             return;
         }
 
-        let opcionesTransporte = '<option value="" disabled selected>Asignar a...</option>';
-        transportes.forEach((t, i) => {
-            const tipoNom = t.tipo === 'bus_50' ? 'Autobús (50)' : (t.tipo === 'microbus_15' ? 'Microbús (15)' : 'Moto');
-            opcionesTransporte += `<option value="${t.id}">Vehículo ${i+1}: ${tipoNom}</option>`;
-        });
-
-        // Traer usuarios anotados a este viaje (o que ya estén asignados)
-        const { data: usuarios } = await window.db.from('usuarios').select('*').eq('viaje_id', viaje_id).in('estado_viaje', ['anotado', 'asignado']);
-        
-        if(!usuarios || usuarios.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay pasajeros anotados para este viaje.</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = '';
-        usuarios.forEach(u => {
-            const fotoSrc = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
+        container.innerHTML = '';
+        transportes.forEach((t, index) => {
+            const adminName = t.admin ? t.admin.nombre_completo : 'Sin Chofer';
+            const imgHtml = t.imagen_url ? `<img src="${t.imagen_url}" style="width:100px; height:60px; object-fit:cover; border-radius:5px; margin-right:15px;">` : `<div style="width:100px; height:60px; background:#e2e8f0; border-radius:5px; margin-right:15px; display:flex; align-items:center; justify-content:center;">🚌</div>`;
             
-            // Reconstruir select con el value seleccionado si ya tiene transporte
-            let userSelect = opcionesTransporte;
-            if(u.transporte_id) {
-                userSelect = userSelect.replace(`value="${u.transporte_id}"`, `value="${u.transporte_id}" selected`);
-                userSelect = userSelect.replace('selected>Asignar', '>Asignar'); // Quitar el selected del placeholder
+            // Filtrar alumnos que ya están en este transporte
+            const alumnosEnTransporte = anotados ? anotados.filter(a => a.transporte_id === t.id) : [];
+            let listaAlumnosHtml = '';
+            if(alumnosEnTransporte.length > 0) {
+                listaAlumnosHtml = alumnosEnTransporte.map(a => `<span class="badge" style="background:#eff6ff; color:#1e40af; margin-right:5px; margin-bottom:5px; display:inline-block;">${a.nombre_completo} <b style="cursor:pointer;color:red;margin-left:5px;" onclick="quitarAlumnoDeTransporte('${a.id}', '${viajeId}')">x</b></span>`).join('');
+            } else {
+                listaAlumnosHtml = '<span class="text-muted" style="font-size:0.8rem;">Ningún alumno asignado aún.</span>';
             }
-            
-            tbody.innerHTML += `
-                <tr>
-                    <td style="text-align:center;"><img src="${fotoSrc}" style="width:35px;height:35px;border-radius:50%;cursor:pointer;object-fit:cover;" onclick="ampliarFoto('${fotoSrc}', '${u.nombre_completo}')"></td>
-                    <td>${u.nombre_completo} <br><small class="text-muted">${u.rol.toUpperCase()}</small></td>
-                    <td>${u.dni || 'Menor'}</td>
-                    <td>
-                        <select onchange="asignarTransporteUsuario('${u.id}', this.value)" style="padding:4px; font-size:0.8rem; border-radius:4px;">
-                            ${userSelect}
-                        </select>
-                        ${u.estado_viaje === 'asignado' ? '<span style="color:var(--success); font-size:12px; margin-left:5px;">✓ Asignado</span>' : ''}
-                    </td>
-                </tr>
+
+            container.innerHTML += `
+                <div style="border:1px solid #cbd5e1; border-radius:8px; padding:15px; background:#fff; display:flex; flex-direction:column; gap:10px;">
+                    <div style="display:flex; align-items:center; border-bottom:1px solid #f1f5f9; padding-bottom:10px;">
+                        ${imgHtml}
+                        <div>
+                            <h4 style="margin:0;">Vehículo #${index + 1} - ${t.tipo.toUpperCase()}</h4>
+                            <p style="margin:0; font-size:0.85rem; color:#64748b;">Chofer: ${adminName} <button class="btn btn-outline" style="padding:2px 5px; font-size:0.7rem; margin-left:5px;" onclick="cambiarChofer('${t.id}', '${t.admin_id}', '${viajeId}')">Cambiar</button></p>
+                        </div>
+                        <button class="btn btn-outline error" style="margin-left:auto; padding:5px 10px; font-size:0.8rem;" onclick="eliminarTransporte('${t.id}', '${viajeId}')">🗑️ Eliminar</button>
+                    </div>
+                    <div>
+                        <div style="margin-bottom:10px;">
+                            <p style="margin-bottom: 5px; font-size: 0.85rem; font-weight: bold; color: #475569;">Alumnos Asignados (por el Chofer):</p>
+                            ${listaAlumnosHtml}
+                        </div>
+                    </div>
+                </div>
             `;
         });
         
     } catch(e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--error);">Error al cargar.</td></tr>';
+        container.innerHTML = '<p class="text-muted">Error al cargar transportes.</p>';
     }
 }
 
-async function asignarTransporteUsuario(userId, transporteId) {
+async function cambiarChofer(transporteId, oldAdminId, viajeId) {
+    const { data: allTransportes } = await window.db.from('transportes').select('admin_id');
+    const assignedAdmins = allTransportes ? allTransportes.map(t => t.admin_id) : [];
+    const { data: admins } = await window.db.from('usuarios').select('id, nombre_completo').eq('rol', 'admin');
+    
+    let optionsHtml = '';
+    let availableCount = 0;
+    if(admins) {
+        admins.forEach(a => {
+            if(!assignedAdmins.includes(a.id)) {
+                optionsHtml += `<option value="${a.id}">${a.nombre_completo}</option>`;
+                availableCount++;
+            }
+        });
+    }
+
+    if (availableCount === 0) {
+        return Swal.fire('Atención', 'No hay administradores disponibles. Todos están asignados a un transporte.', 'warning');
+    }
+
+    const { value: newAdminId } = await Swal.fire({
+        title: 'Cambiar Chofer',
+        html: `
+            <select id="swal-new-admin" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; outline: none;">
+                <option value="">Seleccione un nuevo chofer...</option>
+                ${optionsHtml}
+            </select>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        preConfirm: () => {
+            const val = document.getElementById('swal-new-admin').value;
+            if(!val) Swal.showValidationMessage('Debe seleccionar un chofer');
+            return val;
+        }
+    });
+
+    if (newAdminId) {
+        try {
+            Swal.fire({ title: 'Actualizando...', didOpen: () => Swal.showLoading() });
+            await window.db.from('transportes').update({ admin_id: newAdminId }).eq('id', transporteId);
+            
+            if (oldAdminId && oldAdminId !== 'null' && oldAdminId !== 'undefined') {
+                await window.db.from('usuarios').update({ transporte_id: null, viaje_id: null, asiento: null }).eq('id', oldAdminId);
+            }
+            await window.db.from('usuarios').update({ transporte_id: transporteId, viaje_id: viajeId }).eq('id', newAdminId);
+            
+            Swal.fire('¡Cambiado!', 'Se ha asignado el nuevo chofer.', 'success');
+            cargarTransportesModal(viajeId);
+        } catch(e) {
+            Swal.fire('Error', 'Fallo al cambiar el chofer.', 'error');
+        }
+    }
+}
+
+async function quitarAlumnoDeTransporte(usuarioId, viajeId) {
+    try {
+        await window.db.from('usuarios').update({ transporte_id: null, asiento: null, estado_viaje: 'anotado' }).eq('id', usuarioId);
+        cargarTransportesModal(viajeId);
+    } catch(e) {}
+}
+
+async function asignarTransporteUsuario(usuarioId, transporteId, viajeId) {
+    if(!usuarioId) return;
     try {
         await window.db.from('usuarios').update({ 
             transporte_id: transporteId,
-            estado_viaje: 'asignado' 
-        }).eq('id', userId);
-        
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Asignado con éxito', showConfirmButton: false, timer: 1500 });
-        cargarAnotadosYVehiculos(); // refrescar
-    } catch(e) {
-        Swal.fire('Error', 'No se pudo asignar.', 'error');
-    }
+            viaje_id: viajeId,
+            estado_viaje: 'asignado',
+            asiento: null // Se reinicia el asiento al cambiar de transporte
+        }).eq('id', usuarioId);
+        cargarTransportesModal(viajeId);
+    } catch(e) { Swal.fire('Error', 'No se pudo asignar.', 'error'); }
+}
+
+async function eliminarTransporte(transporteId, viajeId) {
+    Swal.fire({
+        title: '¿Eliminar vehículo?',
+        text: 'Los alumnos asignados quedarán sin vehículo (estado anotado).',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar'
+    }).then(async (res) => {
+        if(res.isConfirmed) {
+            try {
+                // Desasignar alumnos
+                await window.db.from('usuarios').update({ transporte_id: null, asiento: null, estado_viaje: 'anotado' }).eq('transporte_id', transporteId);
+                // Eliminar transporte
+                await window.db.from('transportes').delete().eq('id', transporteId);
+                cargarTransportesModal(viajeId);
+            } catch(e) {}
+        }
+    });
 }
 
 let adminCroquisInterval = null;

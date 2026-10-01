@@ -14,7 +14,11 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- NoSleep.js para evitar que la pantalla se apague y el GPS deje de transmitir en segundo plano -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     
     <style>
         .navbar { position: static; margin-bottom: 2rem; }
@@ -100,6 +104,7 @@
             <!-- MAPA DEL ADMIN -->
             <div class="card">
                 <h3 class="mb-2">Tu Ubicación</h3>
+                <p id="route-summary" class="text-muted" style="margin-bottom: 10px; font-weight: bold; font-size: 0.9rem;"></p>
                 <div id="admin-map"></div>
             </div>
         </div>
@@ -137,12 +142,12 @@
                 <table class="manifest-table">
                     <thead>
                         <tr>
-                            <th>Estudiante</th>
+                            <th>Pasajero</th>
                             <th>Código</th>
                             <th>Parada</th>
                             <th>Asiento</th>
                             <th>Estado</th>
-                            <th>Acción</th>
+                            <th>Acción (Staff)</th>
                         </tr>
                     </thead>
                     <tbody id="manifest-tbody">
@@ -151,8 +156,6 @@
                 </table>
             </div>
         </div>
-        </div>
-
         <!-- CONTENEDOR CROQUIS ADMIN -->
         <div class="card mt-3">
             <h3 class="mb-2">Croquis del Vehículo</h3>
