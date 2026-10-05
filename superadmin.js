@@ -31,6 +31,9 @@ menuItems.forEach(item => {
         if(item.dataset.target === 'viajes') {
             setTimeout(() => { routingMap.invalidateSize(); }, 100);
         }
+        if(item.dataset.target === 'dashboard') {
+            setTimeout(() => { globalMap.invalidateSize(); }, 100);
+        }
     });
 });
 

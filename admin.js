@@ -232,6 +232,7 @@ async function loadAdminDashboard() {
                 .subscribe();
         }
 
+        setTimeout(() => { map.invalidateSize(); }, 500);
     } catch (e) {
         console.error(e);
         Swal.fire('Error', 'No se pudieron cargar los datos del viaje.', 'error');

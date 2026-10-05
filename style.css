@@ -444,6 +444,32 @@ div:where(.swal2-container) button:where(.swal2-styled).swal2-cancel:hover {
 .trip-info h4 { margin-bottom: 4px; font-size: 1.2rem; }
 .trip-info p { margin-bottom: 0; font-size: 0.9rem; }
 
+/* Responsive Tables */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 1rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 600px; /* Evita que las columnas se aplasten demasiado */
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+th {
+    font-weight: 600;
+    color: var(--text-muted);
+    background-color: rgba(241, 245, 249, 0.5);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .container { padding: 1.5rem 1rem; }

@@ -138,7 +138,7 @@
                 <span class="badge" id="count-abordo" style="background:var(--accent); color:white;">A bordo: 0</span>
             </div>
             
-            <div style="overflow-x: auto;">
+            <div class="table-responsive">
                 <table class="manifest-table">
                     <thead>
                         <tr>
@@ -156,6 +156,29 @@
                 </table>
             </div>
         </div>
+        
+        <!-- PARADAS INTERMITENTES -->
+        <div class="card mt-3" id="panel-paradas" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Paradas Intermitentes Solicitadas</h3>
+                <span class="badge" id="count-paradas" style="background:#f59e0b; color:white;">Pendientes: 0</span>
+            </div>
+            <p class="text-muted mb-2">Acepta o rechaza las paradas solicitadas por estudiantes fuera de la ruta principal.</p>
+            <div class="table-responsive">
+                <table class="manifest-table">
+                    <thead>
+                        <tr>
+                            <th>Estudiante</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paradas-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- CONTENEDOR CROQUIS ADMIN -->
         <div class="card mt-3">
             <h3 class="mb-2">Croquis del Vehículo</h3>
