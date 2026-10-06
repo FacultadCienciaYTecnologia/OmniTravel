@@ -154,7 +154,7 @@
                 <h3>Evidencia de limpieza</h3>
                 <p>Suba o tome una fotografía en la que se le vea ayudando a recoger basura. El superadministrador la revisa. Solo si la imagen es válida queda acreditada su participación en U-VIBE.</p>
             </div>
-            <p id="evidencia-estado" class="ayuda">Cargando el estado de su evidencia.</p>
+            <div id="evidencia-estado" class="aviso-evidencia">Cargando el estado de su evidencia.</div>
             <img id="evidencia-preview" class="evidencia-preview" alt="Evidencia enviada" style="display:none;">
             <div class="btn-group" id="evidencia-acciones">
                 <button type="button" class="btn btn-auto" id="btn-evidencia-camara">Tomar foto</button>
@@ -170,8 +170,8 @@
                 <p id="gps-modo-texto">La ruta es la misma para toda la caravana.</p>
             </div>
             <div id="student-map"></div>
-            <button type="button" class="btn btn-danger mapa-accion" onclick="solicitarParadaIntermitente()">Solicitar parada en mi ubicación</button>
-            <p class="ayuda">Esta solicitud es durante el viaje. También debe caer sobre la ruta. No sustituye la parada de subida.</p>
+            <button type="button" class="btn btn-danger mapa-accion" id="btn-parada-ruta" onclick="iniciarSeleccionParada()">Solicitar parada en el mapa</button>
+            <p class="ayuda" id="ayuda-parada-mapa">Marque un punto cerca de la línea del recorrido. No tiene que ser su ubicación actual. Si queda a más de 50 metros de la ruta, no se envía. No sustituye la parada de subida.</p>
         </div>
 
         </div> <!-- Fin panel-viaje-activo -->

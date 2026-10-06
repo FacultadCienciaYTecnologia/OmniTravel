@@ -139,6 +139,42 @@ label {
 
 .ayuda { font-size: 0.88rem; color: var(--muted); margin-top: 0.25rem; }
 
+.aviso-evidencia {
+    margin: 0.85rem 0;
+    padding: 0.95rem 1rem;
+    border: 1px solid var(--line);
+    background: #f4f7fa;
+    color: var(--text);
+}
+.aviso-evidencia strong {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: inherit;
+}
+.aviso-evidencia p {
+    margin: 0.2rem 0 0;
+    color: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+}
+.aviso-evidencia.rechazada {
+    background: #f8eaea;
+    border: 2px solid #8e2f2f;
+    color: #6e2424;
+}
+.aviso-evidencia.aprobada {
+    background: #e7f3ec;
+    border: 2px solid #1d6b45;
+    color: #145236;
+}
+.aviso-evidencia.pendiente {
+    background: #f8f1e4;
+    border: 2px solid #8a5a12;
+    color: #6d4610;
+}
+
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -333,6 +369,16 @@ div:where(.swal2-container) div:where(.swal2-popup) {
     border-radius: 2px !important;
     font-family: 'Source Sans 3', 'Segoe UI', sans-serif !important;
     border: 1px solid var(--line) !important;
+    overflow: hidden;
+}
+div:where(.swal2-container) .swal2-input,
+div:where(.swal2-container) .swal2-textarea,
+div:where(.swal2-container) .swal2-select {
+    box-sizing: border-box !important;
+    width: calc(100% - 3.2em) !important;
+    max-width: calc(100% - 3.2em) !important;
+    margin-left: 1.6em !important;
+    margin-right: 1.6em !important;
 }
 div:where(.swal2-container) button:where(.swal2-styled) {
     border-radius: 2px !important;

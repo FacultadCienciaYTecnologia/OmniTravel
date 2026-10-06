@@ -595,9 +595,13 @@ function llenarSelectorParadas(puntos) {
 }
 
 function marcarPuntoSobreRuta(latlng) {
+    if (window.eligiendoParadaRuta) {
+        confirmarParadaSeleccionada(latlng);
+        return;
+    }
     const select = document.getElementById('parada-select');
     if (!select || select.value !== 'otro') {
-        Swal.fire('Parada de la ruta', 'Para marcar un punto libre, elija primero "Otro punto sobre la ruta".', 'info');
+        Swal.fire('Parada de la ruta', 'Para la parada de subida elija "Otro punto sobre la ruta". Para una parada durante el viaje use "Solicitar parada en el mapa" y después haga clic cerca de la línea.', 'info');
         return;
     }
     const ajustado = puntoSobreRuta(latlng.lat, latlng.lng, geometriaActiva(), MARGEN_RUTA_METROS);
@@ -775,45 +779,64 @@ async function cancelarAsistencia() {
     });
 }
 
-// ====== PARADAS INTERMITENTES ======
-async function solicitarParadaIntermitente() {
-    if (!navigator.geolocation) return Swal.fire('Error', 'Necesitas GPS activo para solicitar parada.', 'error');
-    if (!window.currentViajeId) return Swal.fire('Atención', 'Aún no se ha cargado la ruta completa de tu viaje.', 'warning');
+// ====== PARADAS DURANTE EL VIAJE ======
+function iniciarSeleccionParada() {
+    if (!window.currentViajeId) return Swal.fire('Atención', 'Aún no se ha cargado la ruta de su viaje.', 'warning');
+    if (geometriaActiva().length < 2) return Swal.fire('Ruta', 'El recorrido todavía no está disponible en el mapa.', 'warning');
+    window.eligiendoParadaRuta = !window.eligiendoParadaRuta;
+    const btn = document.getElementById('btn-parada-ruta');
+    const ayuda = document.getElementById('ayuda-parada-mapa');
+    if (!window.eligiendoParadaRuta) {
+        if (btn) btn.innerText = 'Solicitar parada en el mapa';
+        if (ayuda) ayuda.innerText = 'Marque un punto cerca de la línea del recorrido. No tiene que ser su ubicación actual. Si queda a más de 50 metros de la ruta, no se envía. No sustituye la parada de subida.';
+        return;
+    }
+    if (btn) btn.innerText = 'Cancelar selección';
+    if (ayuda) ayuda.innerText = 'Selección activa. Haga clic en el mapa, cerca de la línea. El punto se acepta solo si queda a 50 metros o menos y se ajusta al recorrido.';
+    const panel = document.getElementById('panel-mapa');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+}
 
-    Swal.fire({
-        title: 'Solicitar parada en su ubicación',
-        text: 'Se envía el punto solo si está a 50 metros o menos de la ruta. La caravana no se desvía.',
-        icon: 'info',
+async function confirmarParadaSeleccionada(latlng) {
+    const ajustado = puntoSobreRuta(latlng.lat, latlng.lng, geometriaActiva(), MARGEN_RUTA_METROS);
+    if (!ajustado) {
+        Swal.fire('Fuera de la ruta', 'Ese punto queda a más de 50 metros del recorrido. Elija otro lugar más cerca de la línea. La caravana no se desvía.', 'warning');
+        return;
+    }
+    if (window.markerSolicitudRuta) map.removeLayer(window.markerSolicitudRuta);
+    window.markerSolicitudRuta = L.marker([ajustado.lat, ajustado.lng]).addTo(map).bindPopup('Punto elegido sobre la ruta').openPopup();
+    const respuesta = await Swal.fire({
+        title: 'Solicitar esta parada',
+        text: 'El punto quedó sobre la ruta. Escriba el nombre del lugar para que la administración lo reconozca.',
+        input: 'text',
+        inputPlaceholder: 'Ejemplo: El Delirio',
         showCancelButton: true,
         confirmButtonText: 'Enviar solicitud',
-        cancelButtonText: 'Cancelar'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            navigator.geolocation.getCurrentPosition(async (pos) => {
-                const ajustado = puntoSobreRuta(pos.coords.latitude, pos.coords.longitude, geometriaActiva(), MARGEN_RUTA_METROS);
-                if (!ajustado) {
-                    Swal.fire('Fuera de la ruta', 'Su ubicación no está sobre el recorrido. No se puede desviar la caravana.', 'warning');
-                    return;
-                }
-                try {
-                    const { error } = await window.db.from('paradas_intermitentes').insert([{
-                        viaje_id: window.currentViajeId,
-                        usuario_id: session.id,
-                        lat: ajustado.lat,
-                        lng: ajustado.lng,
-                        estado: 'pendiente'
-                    }]);
-                    if (error) throw error;
-                    Swal.fire('Solicitud enviada', 'La administración verá el punto sobre la ruta.', 'success');
-                } catch (e) {
-                    console.error(e);
-                    Swal.fire('No se envió', 'No se pudo registrar la solicitud.', 'error');
-                }
-            }, () => {
-                Swal.fire('Ubicación', 'No se obtuvo el GPS.', 'error');
-            }, { enableHighAccuracy: true });
-        }
+        cancelButtonText: 'Elegir otro punto'
     });
+    if (!respuesta.isConfirmed) return;
+    const nombre = (respuesta.value || '').trim().replace(/:/g, ' ') || 'Punto sobre la ruta';
+    try {
+        const { error } = await window.db.from('paradas_intermitentes').insert([{
+            viaje_id: window.currentViajeId,
+            usuario_id: session.id,
+            lat: ajustado.lat,
+            lng: ajustado.lng,
+            estado: 'en_ruta:' + nombre
+        }]);
+        if (error) throw error;
+        window.eligiendoParadaRuta = false;
+        const btn = document.getElementById('btn-parada-ruta');
+        const ayuda = document.getElementById('ayuda-parada-mapa');
+        if (btn) btn.innerText = 'Solicitar parada en el mapa';
+        if (ayuda) ayuda.innerText = 'Solicitud enviada. La administración verá el punto que marcó sobre la ruta.';
+        if (window.markerSolicitudRuta) window.markerSolicitudRuta.setPopupContent(nombre).openPopup();
+        Swal.fire('Solicitud enviada', 'Quedó pendiente de aprobación en el punto que eligió.', 'success');
+    } catch (e) {
+        console.error(e);
+        Swal.fire('No se envió', 'No se pudo registrar la solicitud.', 'error');
+    }
 }
 
 function comprimirImagen(file) {
@@ -857,8 +880,12 @@ async function cargarEvidencia() {
     }
     const fila = data && data[0];
     window.evidenciaActual = fila || null;
+    function pintarAviso(clase, titulo, detalle) {
+        estado.className = 'aviso-evidencia' + (clase ? ' ' + clase : '');
+        estado.innerHTML = '<strong>' + escaparHtml(titulo) + '</strong><p>' + escaparHtml(detalle) + '</p>';
+    }
     if (!fila) {
-        estado.innerText = 'Aún no hay evidencia. Tome o suba una foto en la que se le vea recogiendo basura.';
+        pintarAviso('', 'Sin evidencia', 'Tome o suba una foto en la que se le vea recogiendo basura.');
         if (preview) preview.style.display = 'none';
         if (acciones) acciones.style.display = 'flex';
         return;
@@ -868,13 +895,14 @@ async function cargarEvidencia() {
         preview.style.display = 'block';
     }
     if (fila.estado === 'aprobada') {
-        estado.innerText = 'Participación validada para U-VIBE. La fotografía fue aceptada y ya no se puede cambiar.';
+        pintarAviso('aprobada', 'Participación aprobada', 'La fotografía fue aceptada. Su participación queda validada para U-VIBE y ya no se puede cambiar.');
         if (acciones) acciones.style.display = 'none';
     } else if (fila.estado === 'rechazada') {
-        estado.innerText = 'La evidencia fue rechazada' + (fila.observacion ? ': ' + fila.observacion : '.') + ' Puede enviar otra fotografía.';
+        const motivo = fila.observacion ? fila.observacion : 'No se indicó un motivo.';
+        pintarAviso('rechazada', 'Evidencia rechazada', 'Motivo: ' + motivo + ' Puede tomar o subir otra fotografía.');
         if (acciones) acciones.style.display = 'flex';
     } else {
-        estado.innerText = 'Evidencia en revisión. Si la fotografía no corresponde, puede reemplazarla mientras no esté aprobada.';
+        pintarAviso('pendiente', 'Evidencia en revisión', 'La fotografía está pendiente. Puede reemplazarla mientras no sea aprobada.');
         if (acciones) acciones.style.display = 'flex';
     }
 }

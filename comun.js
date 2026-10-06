@@ -87,7 +87,8 @@ function clasificarSolicitud(row) {
     const e = String((row && row.estado) || '');
     if (e.indexOf('abordaje:') === 0) return { tipo: 'abordaje', nombre: e.slice(9), estado: 'pendiente' };
     if (e.indexOf('rechazo:') === 0) return { tipo: 'abordaje', nombre: e.slice(8), estado: 'rechazada' };
-    return { tipo: 'en_ruta', nombre: 'Durante el viaje', estado: e || 'pendiente' };
+    if (e.indexOf('en_ruta:') === 0) return { tipo: 'en_ruta', nombre: e.slice(8) || 'Punto sobre la ruta', estado: 'pendiente' };
+    return { tipo: 'en_ruta', nombre: 'Punto sobre la ruta', estado: e || 'pendiente' };
 }
 
 function esLecturaMasNueva(a, b) {
