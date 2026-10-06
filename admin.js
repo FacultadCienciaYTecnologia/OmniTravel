@@ -218,11 +218,15 @@ async function loadAdminDashboard() {
                         title: 'Solicitud de parada',
                         text: nombre + ' solicitó ' + tipoTxt + lugar + '.',
                         icon: 'info',
+                        showDenyButton: true,
                         showCancelButton: true,
                         confirmButtonText: 'Aprobar',
-                        cancelButtonText: 'Rechazar'
+                        denyButtonText: 'Rechazar',
+                        cancelButtonText: 'Dejar pendiente'
                     }).then(async (result) => {
-                        await resolverSolicitud(p, result.isConfirmed ? 'aprobada' : 'rechazada');
+                        if (result.isConfirmed) await resolverSolicitud(p, 'aprobada');
+                        else if (result.isDenied) await resolverSolicitud(p, 'rechazada');
+                        cargarSolicitudesParada();
                     });
                     cargarSolicitudesParada();
                 })

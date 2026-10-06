@@ -89,6 +89,7 @@
                 <div class="menu-item" data-target="gestion-viajes">Gestión de Viajes</div>
                 <div class="menu-item" data-target="asignacion">Asignación de pasajeros</div>
                 <div class="menu-item" data-target="operacion">Operación del viaje</div>
+                <div class="menu-item" data-target="paradas">Solicitudes de parada <span id="badge-paradas" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
                 <div class="menu-item" data-target="evidencias">Evidencias <span id="badge-evidencias" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
                 <div class="menu-item menu-salir" onclick="logout()">Cerrar Sesión</div>
             </div>
@@ -381,6 +382,33 @@
                     <h3 class="mb-2">Asientos de la unidad</h3>
                     <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. El frente queda a la izquierda.</p>
                     <div id="op-croquis" style="width:100%; overflow-x:auto;"><p class="text-muted">Elija una unidad.</p></div>
+                </div>
+            </div>
+
+            <div id="paradas" class="tab-content">
+                <div class="card" style="padding:1.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+                        <h3 class="mb-2">Solicitudes de parada</h3>
+                        <span class="badge" id="super-paradas-count" style="background:var(--warning); color:#fff;">Pendientes: 0</span>
+                    </div>
+                    <p class="text-muted mb-3">Llegan aquí las mismas solicitudes que ve el chofer: parada de subida y punto durante el viaje. El superadministrador puede aprobarlas o rechazarlas en cualquier viaje.</p>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Estudiante</th>
+                                    <th>Viaje</th>
+                                    <th>Tipo</th>
+                                    <th>Lugar</th>
+                                    <th>Estado</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="super-paradas">
+                                <tr><td colspan="6">Cargando solicitudes.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 

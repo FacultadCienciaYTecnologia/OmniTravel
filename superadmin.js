@@ -37,6 +37,7 @@ menuItems.forEach(item => {
         if(item.dataset.target === 'evidencias') cargarEvidencias();
         if(item.dataset.target === 'asignacion') cargarAsignacionPanel();
         if(item.dataset.target === 'operacion') cargarOperacion();
+        if(item.dataset.target === 'paradas') cargarSolicitudesSuper();
     });
 });
 
@@ -85,6 +86,7 @@ async function loadDashboard() {
         pintarGpsGlobal();
         cargarBiblioteca();
         cargarEvidencias();
+        cargarSolicitudesSuper();
 
         // Transportes
         const { data: transportes } = await window.db.from('transportes').select('*');
@@ -142,22 +144,29 @@ async function loadDashboard() {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
                     loadDashboard(); // Refresca lista de viajes
                 })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, async (payload) => {
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'paradas_intermitentes' }, async (payload) => {
+                    cargarSolicitudesSuper();
+                    if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+                    if (payload.eventType !== 'INSERT' || !payload.new) return;
                     const p = payload.new;
                     const info = clasificarSolicitud(p);
+                    if (info.estado !== 'pendiente') return;
                     const { data: u } = await window.db.from('usuarios').select('nombre_completo').eq('id', p.usuario_id).maybeSingle();
                     const nombre = u ? u.nombre_completo : 'Un estudiante';
                     const tipoTxt = info.tipo === 'abordaje' ? 'subirse' : 'una parada durante el recorrido';
-                    Swal.fire({
+                    const aviso = await Swal.fire({
                         title: 'Solicitud de parada',
                         text: nombre + ' solicitó ' + tipoTxt + (info.nombre ? ' en ' + info.nombre : '') + '.',
                         icon: 'info',
+                        showDenyButton: true,
                         showCancelButton: true,
                         confirmButtonText: 'Aprobar',
-                        cancelButtonText: 'Rechazar'
-                    }).then(async (result) => {
-                        await resolverSolicitudGuardada(p, result.isConfirmed ? 'aprobada' : 'rechazada');
+                        denyButtonText: 'Rechazar',
+                        cancelButtonText: 'Dejar pendiente'
                     });
+                    if (aviso.isConfirmed) await resolverSolicitudGuardada(p, 'aprobada');
+                    else if (aviso.isDenied) await resolverSolicitudGuardada(p, 'rechazada');
+                    cargarSolicitudesSuper();
                 })
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
                     if (window.currentViajeMonitoreo) verRutaActiva(window.currentViajeMonitoreo, true);
@@ -1453,6 +1462,65 @@ async function eliminarDeBiblioteca(id) {
     if (!res.isConfirmed) return;
     ocultarParadaLocal(id);
     cargarBiblioteca();
+}
+
+async function cargarSolicitudesSuper() {
+    const tbody = document.getElementById('super-paradas');
+    const badge = document.getElementById('badge-paradas');
+    const contador = document.getElementById('super-paradas-count');
+    if (!tbody) return;
+    const { data, error } = await window.db.from('paradas_intermitentes').select('*');
+    if (error) {
+        if (badge) badge.style.display = 'none';
+        tbody.innerHTML = '<tr><td colspan="6">No se pudieron cargar las solicitudes.</td></tr>';
+        return;
+    }
+    const filas = (data || []).slice().sort((a, b) => {
+        const pa = clasificarSolicitud(a).estado === 'pendiente' ? 0 : 1;
+        const pb = clasificarSolicitud(b).estado === 'pendiente' ? 0 : 1;
+        return pa - pb;
+    });
+    const pendientes = filas.filter((s) => clasificarSolicitud(s).estado === 'pendiente').length;
+    if (badge) {
+        badge.style.display = pendientes ? 'inline' : 'none';
+        badge.innerText = pendientes;
+    }
+    if (contador) contador.innerText = 'Pendientes: ' + pendientes;
+    if (!filas.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No hay solicitudes.</td></tr>';
+        return;
+    }
+    const userIds = [...new Set(filas.map((s) => s.usuario_id).filter(Boolean))];
+    const viajeIds = [...new Set(filas.map((s) => s.viaje_id).filter(Boolean))];
+    const personasP = userIds.length ? window.db.from('usuarios').select('id, nombre_completo').in('id', userIds) : Promise.resolve({ data: [] });
+    const viajesP = viajeIds.length ? window.db.from('viajes').select('id, titulo').in('id', viajeIds) : Promise.resolve({ data: [] });
+    const [{ data: personas }, { data: viajes }] = await Promise.all([personasP, viajesP]);
+    const nombres = {};
+    (personas || []).forEach((u) => { nombres[u.id] = u.nombre_completo; });
+    const titulos = {};
+    (viajes || []).forEach((v) => { titulos[v.id] = v.titulo; });
+    tbody.innerHTML = filas.map((p) => {
+        const info = clasificarSolicitud(p);
+        const acciones = info.estado === 'pendiente'
+            ? `<button type="button" class="btn btn-success btn-auto" onclick="superResolverParada('${p.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="superResolverParada('${p.id}', 'rechazada')">Rechazar</button>`
+            : escaparHtml(info.estado);
+        return `<tr>
+            <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
+            <td>${escaparHtml(titulos[p.viaje_id] || 'Viaje')}</td>
+            <td>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</td>
+            <td>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</td>
+            <td>${escaparHtml(info.estado)}</td>
+            <td>${acciones}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function superResolverParada(id, decision) {
+    const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).single();
+    if (!p) return;
+    await resolverSolicitudGuardada(p, decision);
+    cargarSolicitudesSuper();
+    if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
 }
 
 async function resolverSolicitudGuardada(p, decision) {
