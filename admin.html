@@ -61,25 +61,35 @@
 </head>
 <body>
 
-    <nav class="navbar">
-        <a href="#" class="nav-brand">OmniTravel Admin/Chofer</a>
-        <div style="display: flex; align-items: center; gap: 10px;">
+    <button type="button" class="menu-toggle" id="menu-toggle">Menú</button>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <div class="dashboard-container">
+    <aside class="sidebar" id="sidebar">
+        <a href="#" class="nav-brand">OmniTravel<small>Unidad de transporte</small></a>
+        <div class="sidebar-user">
+            <img id="nav-profile-pic" src="" alt="Perfil">
             <span class="user-badge" id="admin-name">Admin: Chofer</span>
-            <img id="nav-profile-pic" src="" alt="Perfil" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); background: #fff;">
-            <button class="btn btn-outline" style="padding: 0.4rem 1rem; width: auto;" onclick="logout()">Salir</button>
         </div>
-    </nav>
+        <div class="sidebar-menu">
+            <div class="menu-item" data-ir="panel-control">Control del viaje</div>
+            <div class="menu-item" data-ir="panel-manifiesto">Manifiesto</div>
+            <div class="menu-item" data-ir="panel-paradas">Solicitudes</div>
+            <div class="menu-item" data-ir="panel-croquis-admin">Croquis</div>
+            <div class="menu-item menu-salir" onclick="logout()">Cerrar sesión</div>
+        </div>
+    </aside>
+    <div class="main-content">
 
     <div class="container" style="padding-top: 0;">
         
-        <div class="grid grid-2 mb-3">
+        <div class="grid grid-2 mb-3" id="panel-control">
             <!-- PANEL DE CONTROL GPS -->
             <div class="card" style="display:flex; flex-direction:column; justify-content:center;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <h3 class="mb-2">Control de Viaje</h3>
+                    <h3 class="mb-2">Control del viaje</h3>
                     <span class="badge" id="estado-ruta" style="background:#e0e7ff; color:#4338ca;">Preparación</span>
                 </div>
-                <p class="text-muted mb-3">Inicia la ruta para activar el GPS y notificar a los pasajeros.</p>
+                <p class="text-muted mb-3">Inicie la ruta desde el punto de salida. El GPS avisa a los pasajeros según el modo definido en el viaje.</p>
                 
                 <div style="background: #f8fafc; padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
                     <div>
@@ -109,30 +119,13 @@
             </div>
         </div>
 
-        <!-- GESTIÓN DE ASIGNACIONES (NUEVO) -->
-        <div class="card mb-3">
-            <h3 class="mb-2">Asignación Manual de Pasajeros</h3>
-            <p class="text-muted mb-3">Asigna usuarios que se han anotado a un vehículo específico para este viaje.</p>
-            
-            <div class="table-responsive">
-                <table class="data-table manifest-table" id="table-asignacion">
-                    <thead>
-                        <tr>
-                            <th>Foto</th>
-                            <th>Nombre</th>
-                            <th>DNI</th>
-                            <th>Asignar a Vehículo</th>
-                        </tr>
-                    </thead>
-                    <tbody id="table-asignacion-body">
-                        <tr><td colspan="4" style="text-align:center;">Cargando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+        <div class="guia">
+            <strong>Asignación de pasajeros</strong>
+            <p>La asignación a cada unidad la realiza el superadministrador. Aquí se consulta el manifiesto, la asistencia y las solicitudes de parada.</p>
         </div>
 
         <!-- LISTA DE ABORDAJE (MANIFIESTO) -->
-        <div class="card">
+        <div class="card" id="panel-manifiesto">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
                 <h3>Manifiesto de Pasajeros</h3>
                 <span class="badge" id="count-abordo" style="background:var(--accent); color:white;">A bordo: 0</span>
@@ -158,40 +151,46 @@
         </div>
         
         <!-- PARADAS INTERMITENTES -->
-        <div class="card mt-3" id="panel-paradas" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Paradas Intermitentes Solicitadas</h3>
-                <span class="badge" id="count-paradas" style="background:#f59e0b; color:white;">Pendientes: 0</span>
+        <div class="card mt-3" id="panel-paradas">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
+                <h3>Solicitudes de parada</h3>
+                <span class="badge" id="count-paradas" style="background:var(--warning); color:white;">Pendientes: 0</span>
             </div>
-            <p class="text-muted mb-2">Acepta o rechaza las paradas solicitadas por estudiantes fuera de la ruta principal.</p>
+            <p class="text-muted mb-2">Subida u otro punto durante el viaje. Solo se aceptan puntos sobre la ruta.</p>
             <div class="table-responsive">
                 <table class="manifest-table">
                     <thead>
                         <tr>
                             <th>Estudiante</th>
+                            <th>Tipo</th>
+                            <th>Lugar</th>
                             <th>Estado</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody id="paradas-tbody">
+                        <tr><td colspan="5">Sin solicitudes.</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
         <!-- CONTENEDOR CROQUIS ADMIN -->
-        <div class="card mt-3">
-            <h3 class="mb-2">Croquis del Vehículo</h3>
-            <p class="text-muted mb-3">Como administrador, puedes elegir tu propio asiento.</p>
+        <div class="card mt-3" id="panel-croquis-admin">
+            <h3 class="mb-2">Croquis de la unidad</h3>
+            <p class="text-muted mb-3">El puesto de chofer no es un asiento. Puede reservar su lugar sin esperar el horario de los estudiantes. El microbús tiene 16 plazas, con tres adelante.</p>
             
             <div class="mt-3" id="admin-croquis" style="margin:0 auto; display:flex; justify-content:center; align-items:center;">
                 <div class="text-muted">Cargando croquis...</div>
             </div>
         </div>
     </div>
+    </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase.js"></script>
+    <script src="comun.js"></script>
     <script src="admin.js"></script>
 </body>
 </html>

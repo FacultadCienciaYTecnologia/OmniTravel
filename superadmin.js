@@ -34,6 +34,7 @@ menuItems.forEach(item => {
         if(item.dataset.target === 'dashboard') {
             setTimeout(() => { globalMap.invalidateSize(); }, 100);
         }
+        if(item.dataset.target === 'evidencias') cargarEvidencias();
     });
 });
 
@@ -79,6 +80,9 @@ async function loadDashboard() {
         const { data: viajes } = await window.db.from('viajes').select('*');
         document.getElementById('stat-viajes').innerText = viajes ? viajes.length : 0;
         renderViajes(viajes || []);
+        pintarGpsGlobal();
+        cargarBiblioteca();
+        cargarEvidencias();
 
         // Transportes
         const { data: transportes } = await window.db.from('transportes').select('*');
@@ -136,26 +140,26 @@ async function loadDashboard() {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
                     loadDashboard(); // Refresca lista de viajes
                 })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
-                    // Refrescar mapa si estamos viendo la ruta activa
-                    if(window.currentViajeMonitoreo) {
-                        verRutaActiva(window.currentViajeMonitoreo);
-                    }
-                })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, async (payload) => {
                     const p = payload.new;
+                    const info = clasificarSolicitud(p);
+                    const { data: u } = await window.db.from('usuarios').select('nombre_completo').eq('id', p.usuario_id).maybeSingle();
+                    const nombre = u ? u.nombre_completo : 'Un estudiante';
+                    const tipoTxt = info.tipo === 'abordaje' ? 'subirse' : 'una parada durante el recorrido';
                     Swal.fire({
-                        title: 'Nueva Solicitud de Parada',
-                        text: 'Un estudiante ha solicitado una parada intermitente. ¿Deseas aprobarla?',
+                        title: 'Solicitud de parada',
+                        text: nombre + ' solicitó ' + tipoTxt + (info.nombre ? ' en ' + info.nombre : '') + '.',
                         icon: 'info',
                         showCancelButton: true,
-                        confirmButtonText: 'Sí, aprobar',
+                        confirmButtonText: 'Aprobar',
                         cancelButtonText: 'Rechazar'
                     }).then(async (result) => {
-                        const nuevoEstado = result.isConfirmed ? 'aprobada' : 'rechazada';
-                        await window.db.from('paradas_intermitentes').update({estado: nuevoEstado}).eq('id', p.id);
-                        if(result.isConfirmed) Swal.fire('Aprobada', 'Se notificó la parada.', 'success');
+                        await resolverSolicitudGuardada(p, result.isConfirmed ? 'aprobada' : 'rechazada');
                     });
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
+                    if (window.currentViajeMonitoreo) verRutaActiva(window.currentViajeMonitoreo, true);
+                    else pintarGpsGlobal();
                 })
                 .subscribe();
         }
@@ -380,6 +384,115 @@ let routeControl = L.Routing.control({
     }
 }).addTo(routingMap);
 
+routeControl.on('routesfound', function() { pintarParadasEditor(); });
+
+function leerWaypoints() {
+    return routeControl.getWaypoints().filter((w) => w.latLng);
+}
+
+function sincronizarMetaParadas() {
+    const wps = leerWaypoints();
+    const previa = window.metaParadas || [];
+    window.metaParadas = wps.map((w, i) => {
+        const porDist = previa.find((m) => distanciaMetros(m.lat, m.lng, w.latLng.lat, w.latLng.lng) < 80);
+        const base = porDist || previa[i] || {};
+        const nombre = (w.options && w.options.nombre) || w.name || base.nombre || ('Parada ' + (i + 1));
+        const tiempo = (w.options && w.options.tiempo) ? w.options.tiempo : (base.tiempo || '');
+        w.options = Object.assign({}, w.options, { nombre: nombre, tiempo: tiempo });
+        return { lat: w.latLng.lat, lng: w.latLng.lng, nombre: nombre, tiempo: tiempo };
+    });
+}
+
+function pintarParadasEditor() {
+    const lista = document.getElementById('lista-paradas-editor');
+    if (!lista) return;
+    sincronizarMetaParadas();
+    const puntos = window.metaParadas || [];
+    if (!puntos.length) {
+        lista.innerHTML = '<p class="text-muted" style="padding:0.75rem;">Todavía no hay puntos. Haga clic en el mapa.</p>';
+        return;
+    }
+    lista.innerHTML = puntos.map((p, i) => {
+        const hora = p.tiempo ? ' · ' + escaparHtml(p.tiempo) : '';
+        return `<div class="parada-editor-item"><span><b>${i + 1}.</b> ${escaparHtml(p.nombre)}${hora}</span><button type="button" class="btn btn-outline btn-auto" onclick="quitarParada(${i})">Quitar</button></div>`;
+    }).join('');
+}
+
+function quitarParada(indice) {
+    const wps = leerWaypoints();
+    if (indice < 0 || indice >= wps.length) return;
+    const meta = (window.metaParadas || []).slice();
+    meta.splice(indice, 1);
+    wps.splice(indice, 1);
+    window.metaParadas = meta;
+    routeControl.setWaypoints(wps);
+    pintarParadasEditor();
+}
+
+function salirModoEdicion() {
+    window.viajeEnEdicion = null;
+    const aviso = document.getElementById('aviso-edicion');
+    if (aviso) aviso.style.display = 'none';
+    const btn = document.getElementById('btn-save-viaje');
+    if (btn) btn.innerText = 'Guardar Viaje y Ruta';
+}
+
+function cancelarEdicionViaje() {
+    salirModoEdicion();
+    document.getElementById('v-nombre').value = '';
+    document.getElementById('v-fecha').value = '';
+    document.getElementById('v-inicio-asientos').value = '';
+    document.getElementById('v-cierre-asientos').value = '';
+    document.getElementById('v-modo-gps').value = '';
+    window.metaParadas = [];
+    routeControl.setWaypoints([]);
+    pintarParadasEditor();
+}
+
+function aDatetimeLocal(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (isNaN(d.getTime())) return String(valor).slice(0, 16);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+async function editarRecorrido(id) {
+    const { data: viaje, error } = await window.db.from('viajes').select('*').eq('id', id).single();
+    if (error || !viaje) return Swal.fire('Viaje', 'No se pudo abrir el recorrido.', 'error');
+    window.viajeEnEdicion = viaje;
+    const item = document.querySelector('.menu-item[data-target="viajes"]');
+    if (item) item.click();
+    document.getElementById('v-nombre').value = viaje.titulo || '';
+    document.getElementById('v-fecha').value = aDatetimeLocal(viaje.fecha_salida);
+    document.getElementById('v-inicio-asientos').value = aDatetimeLocal(viaje.inicio_asientos);
+    document.getElementById('v-cierre-asientos').value = aDatetimeLocal(viaje.cierre_asientos);
+    document.getElementById('v-modo-gps').value = modoGpsDe(viaje);
+    const puntos = puntosDeRuta(viaje.ruta);
+    window.metaParadas = puntos.map((p, i) => ({
+        lat: p.lat,
+        lng: p.lng,
+        nombre: p.nombre || ('Parada ' + (i + 1)),
+        tiempo: p.tiempo || ''
+    }));
+    routeControl.setWaypoints(window.metaParadas.map((p) => L.Routing.waypoint(L.latLng(p.lat, p.lng), p.nombre, { nombre: p.nombre, tiempo: p.tiempo })));
+    document.getElementById('aviso-edicion').style.display = 'block';
+    document.getElementById('aviso-edicion-titulo').innerText = 'Editando: ' + (viaje.titulo || 'viaje');
+    document.getElementById('btn-save-viaje').innerText = 'Guardar cambios del recorrido';
+    pintarParadasEditor();
+    setTimeout(() => {
+        routingMap.invalidateSize();
+        if (puntos.length) routingMap.fitBounds(L.latLngBounds(puntos.map((p) => [p.lat, p.lng])), { padding: [24, 24] });
+    }, 250);
+}
+
+document.getElementById('btn-quitar-ultima').addEventListener('click', () => {
+    const total = leerWaypoints().length;
+    if (!total) return;
+    quitarParada(total - 1);
+});
+document.getElementById('btn-cancelar-edicion').addEventListener('click', cancelarEdicionViaje);
+
 // En caso de error de OSRM (ej. 429), ocultar el error visual pero mantener la ruta (solo que recta)
 routeControl.on('routingerror', function(e) {
     console.warn('Error de enrutamiento OSRM (límite alcanzado). Dibujando línea recta en su lugar.', e);
@@ -392,27 +505,31 @@ routingMap.on('click', async function(e) {
     const { value: formValues } = await Swal.fire({
         title: `Detalles de Parada ${currentWaypoints.length + 1}`,
         html:
-            '<input id="swal-p-nombre" class="swal2-input" placeholder="Nombre (Ej. Metrocentro)" style="width:80% !important;">' +
-            '<input id="swal-p-tiempo" type="time" class="swal2-input" style="width:80% !important;">',
+            '<input id="swal-p-nombre" class="swal2-input" placeholder="Nombre (ejemplo: UGB San Miguel)" style="width:80% !important;">' +
+            '<input id="swal-p-tiempo" type="time" class="swal2-input" style="width:80% !important;">' +
+            '<label style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:8px;"><input type="checkbox" id="swal-p-bib" checked> Guardar en la biblioteca</label>',
         focusConfirm: false,
         showCancelButton: true,
-        confirmButtonText: 'Añadir Parada',
+        confirmButtonText: 'Añadir a este viaje',
         preConfirm: () => {
             return {
                 nombre: document.getElementById('swal-p-nombre').value,
-                tiempo: document.getElementById('swal-p-tiempo').value
+                tiempo: document.getElementById('swal-p-tiempo').value,
+                biblioteca: document.getElementById('swal-p-bib').checked
             }
         }
     });
 
+    window.ultimoPuntoMapa = e.latlng;
     if (formValues) {
+        const nombre = formValues.nombre || `Parada ${currentWaypoints.length + 1}`;
         const wp = L.Routing.waypoint(e.latlng);
-        wp.options = { 
-            nombre: formValues.nombre || `Parada ${currentWaypoints.length + 1}`, 
-            tiempo: formValues.tiempo || '' 
-        };
+        wp.options = { nombre, tiempo: formValues.tiempo || '' };
         currentWaypoints.push(wp);
         routeControl.setWaypoints(currentWaypoints);
+        if (formValues.biblioteca && formValues.nombre) {
+            await guardarEnBiblioteca(formValues.nombre.trim(), e.latlng.lat, e.latlng.lng);
+        }
     }
 });
 
@@ -422,17 +539,18 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
     const fecha = document.getElementById('v-fecha').value;
     const inicio_asientos = document.getElementById('v-inicio-asientos').value;
     const cierre_asientos = document.getElementById('v-cierre-asientos').value;
+    const modo_gps = document.getElementById('v-modo-gps').value;
     
-    if(!titulo || !fecha || !inicio_asientos || !cierre_asientos) return Swal.fire('Error', 'Completa todos los campos de fechas y nombres.', 'warning');
+    if(!titulo || !fecha || !inicio_asientos || !cierre_asientos || !modo_gps) return Swal.fire('Datos incompletos', 'Complete el nombre, las fechas y el modo de GPS.', 'warning');
     
-    const waypoints = routeControl.getWaypoints().filter(w => w.latLng);
-    if(waypoints.length < 2) return Swal.fire('Error', 'Debes hacer clic en el mapa al menos dos veces (Origen y Destino).', 'warning');
-    
-    const waypointsJSON = waypoints.map(w => ({ 
-        lat: w.latLng.lat, 
-        lng: w.latLng.lng,
-        nombre: w.options?.nombre || 'Parada',
-        tiempo: w.options?.tiempo || ''
+    const waypoints = leerWaypoints();
+    if(waypoints.length < 2) return Swal.fire('Error', 'Debe haber al menos dos puntos en el mapa: salida y destino.', 'warning');
+    sincronizarMetaParadas();
+    const waypointsJSON = (window.metaParadas || []).map((p) => ({
+        lat: p.lat,
+        lng: p.lng,
+        nombre: p.nombre || 'Parada',
+        tiempo: p.tiempo || ''
     }));
 
     const btn = document.getElementById('btn-save-viaje');
@@ -448,26 +566,30 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
     });
 
     try {
-        const { error } = await window.db.from('viajes').insert([{
-            titulo,
-            fecha_salida: fecha,
-            inicio_asientos: inicio_asientos,
-            cierre_asientos: cierre_asientos,
-            ruta: waypointsJSON,
-            inscripcion_abierta: true,
-            estado: 'preparacion'
-        }]);
+        const ruta = conModoGps(waypointsJSON, modo_gps);
+        const editando = window.viajeEnEdicion;
+        const { error } = editando
+            ? await window.db.from('viajes').update({
+                titulo,
+                fecha_salida: fecha,
+                inicio_asientos: inicio_asientos,
+                cierre_asientos: cierre_asientos,
+                ruta: ruta
+            }).eq('id', editando.id)
+            : await window.db.from('viajes').insert([{
+                titulo,
+                fecha_salida: fecha,
+                inicio_asientos: inicio_asientos,
+                cierre_asientos: cierre_asientos,
+                ruta: ruta,
+                inscripcion_abierta: true,
+                estado: 'preparacion'
+            }]);
         
         if (error) throw error;
         
-        Swal.fire('¡Éxito!', 'Viaje programado correctamente.', 'success');
-        
-        // Limpiar
-        document.getElementById('v-nombre').value = '';
-        document.getElementById('v-fecha').value = '';
-        document.getElementById('v-inicio-asientos').value = '';
-        document.getElementById('v-cierre-asientos').value = '';
-        routeControl.setWaypoints([]);
+        Swal.fire('Guardado', editando ? 'El recorrido quedó actualizado.' : 'Viaje programado correctamente.', 'success');
+        cancelarEdicionViaje();
         
         loadDashboard(); // Refrescar listas
     } catch(e) {
@@ -475,7 +597,7 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
         Swal.fire('Error', 'No se guardó el viaje.', 'error');
     } finally {
         btn.disabled = false;
-        btn.innerText = "Guardar Viaje y Ruta";
+        if (!window.viajeEnEdicion) btn.innerText = "Guardar Viaje y Ruta";
     }
 });
 
@@ -491,13 +613,15 @@ function renderViajes(viajes) {
     
     viajes.forEach(v => {
         
-        const btnTransportes = `<button class="btn btn-primary btn-auto" onclick="abrirModalTransportes('${v.id}', '${v.titulo}')">🚍 Transportes</button>`;
+        const btnTransportes = `<button class="btn btn-primary btn-auto" onclick="abrirModalTransportes('${v.id}', '${escaparHtml(v.titulo).replace(/'/g, '')}')">Transportes y asignación</button>`;
         const btnInscripcion = v.inscripcion_abierta 
             ? `<button class="btn btn-outline error btn-auto" onclick="toggleInscripcion('${v.id}', false)">Cerrar Inscripción</button>`
             : `<button class="btn btn-success btn-auto" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
 
         const btnCroquis = `<button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
-        const btnEdit = `<button class="btn btn-outline btn-auto" onclick="editarViaje('${v.id}')">Editar</button>`;
+        const btnRuta = `<button class="btn btn-outline btn-auto" onclick="editarRecorrido('${v.id}')">Editar recorrido</button>`;
+        const btnEdit = `<button class="btn btn-outline btn-auto" onclick="editarViaje('${v.id}')">Editar datos</button>`;
+        const btnMapa = `<button class="btn btn-outline btn-auto" onclick="verRutaActiva('${v.id}')">Ver en mapa</button>`;
         const btnDelete = `<button class="btn btn-danger btn-auto" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
         const btnRestart = v.estado === 'finalizado' ? `<button class="btn btn-warning btn-auto" style="background:#eab308; border-color:#ca8a04; color:#fff;" onclick="reiniciarViaje('${v.id}')">Reiniciar</button>` : '';
 
@@ -507,13 +631,16 @@ function renderViajes(viajes) {
                     <h4>${v.titulo}</h4>
                     <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
                     <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
-                    <p>Estado: <b>${v.estado.toUpperCase()}</b></p>
+                    <p>Estado: <b>${escaparHtml(v.estado).toUpperCase()}</b></p>
+                    <p>GPS: <b>${modoGpsDe(v) === 'caravana' ? 'Caravana' : 'Por transporte'}</b></p>
                 </div>
                 <div class="btn-group" style="display:flex; gap:5px; flex-wrap:wrap;">
                     ${btnTransportes}
+                    ${btnMapa}
                     ${btnRestart}
                     ${btnInscripcion}
                     ${btnCroquis}
+                    ${btnRuta}
                     ${btnEdit}
                     ${btnDelete}
                 </div>
@@ -540,8 +667,13 @@ async function editarViaje(id) {
             `<input id="swal-v-fecha" type="datetime-local" class="swal2-input" value="${viaje.fecha_salida.slice(0,16)}">` +
             `<label style="display:block; margin-top:10px; font-size:14px;">Inicio Selección Asientos:</label>` +
             `<input id="swal-v-inicio" type="datetime-local" class="swal2-input" value="${viaje.inicio_asientos.slice(0,16)}">` +
-            `<label style="display:block; margin-top:10px; font-size:14px;">Cierre Selección Asientos:</label>` +
-            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">`,
+            `<label style="display:block; margin-top:10px; font-size:14px;">Cierre de selección de asientos</label>` +
+            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">` +
+            `<label style="display:block; margin-top:10px; font-size:14px;">Transmisión GPS</label>` +
+            `<select id="swal-v-gps" class="swal2-input">
+                <option value="por_transporte" ${modoGpsDe(viaje) !== 'caravana' ? 'selected' : ''}>Cada transporte transmite su ubicación</option>
+                <option value="caravana" ${modoGpsDe(viaje) === 'caravana' ? 'selected' : ''}>Una sola ubicación para la caravana</option>
+            </select>`,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Guardar Cambios',
@@ -550,14 +682,22 @@ async function editarViaje(id) {
                 titulo: document.getElementById('swal-v-titulo').value,
                 fecha_salida: document.getElementById('swal-v-fecha').value,
                 inicio_asientos: document.getElementById('swal-v-inicio').value,
-                cierre_asientos: document.getElementById('swal-v-cierre').value
+                cierre_asientos: document.getElementById('swal-v-cierre').value,
+                modo_gps: document.getElementById('swal-v-gps').value
             }
         }
     });
 
     if (formValues) {
         try {
-            await window.db.from('viajes').update(formValues).eq('id', id);
+            const modo = formValues.modo_gps;
+            await window.db.from('viajes').update({
+                titulo: formValues.titulo,
+                fecha_salida: formValues.fecha_salida,
+                inicio_asientos: formValues.inicio_asientos,
+                cierre_asientos: formValues.cierre_asientos,
+                ruta: conModoGps(puntosDeRuta(viaje.ruta), modo)
+            }).eq('id', id);
             Swal.fire('Guardado', 'El viaje ha sido actualizado.', 'success');
             loadDashboard();
         } catch(e) { Swal.fire('Error', 'No se pudo actualizar.', 'error'); }
@@ -716,10 +856,11 @@ async function cargarTransportesModal(viajeId) {
         }
         
         // Traer SOLO los alumnos anotados a ESTE viaje
-        const { data: anotados } = await window.db.from('usuarios').select('id, nombre_completo, transporte_id').eq('viaje_id', viajeId).in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
+        const { data: anotados } = await window.db.from('usuarios').select('id, nombre_completo, dni, transporte_id, rol').eq('viaje_id', viajeId).in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
         
         if(!transportes || transportes.length === 0) {
-            container.innerHTML = '<p class="text-muted">Aún no hay transportes asignados a este viaje.</p>';
+            container.innerHTML = '<p class="text-muted">Aún no hay transportes en este viaje. Agregue las unidades y después asigne a cada persona.</p>';
+            renderAsignacionSuper(viajeId, [], anotados || []);
             return;
         }
 
@@ -745,17 +886,18 @@ async function cargarTransportesModal(viajeId) {
                             <h4 style="margin:0;">Vehículo #${index + 1} - ${t.tipo.toUpperCase()}</h4>
                             <p style="margin:0; font-size:0.85rem; color:#64748b;">Chofer: ${adminName} <button class="btn btn-outline" style="padding:2px 5px; font-size:0.7rem; margin-left:5px;" onclick="cambiarChofer('${t.id}', '${t.admin_id}', '${viajeId}')">Cambiar</button></p>
                         </div>
-                        <button class="btn btn-outline error" style="margin-left:auto; padding:5px 10px; font-size:0.8rem;" onclick="eliminarTransporte('${t.id}', '${viajeId}')">🗑️ Eliminar</button>
+                        <button class="btn btn-outline error" style="margin-left:auto; padding:5px 10px; font-size:0.8rem;" onclick="eliminarTransporte('${t.id}', '${viajeId}')">Eliminar</button>
                     </div>
                     <div>
                         <div style="margin-bottom:10px;">
-                            <p style="margin-bottom: 5px; font-size: 0.85rem; font-weight: bold; color: #475569;">Alumnos Asignados (por el Chofer):</p>
+                            <p style="margin-bottom: 5px; font-size: 0.85rem; font-weight: bold; color: #475569;">Pasajeros en esta unidad</p>
                             ${listaAlumnosHtml}
                         </div>
                     </div>
                 </div>
             `;
         });
+        renderAsignacionSuper(viajeId, transportes, anotados || []);
         
     } catch(e) {
         console.error(e);
@@ -891,99 +1033,10 @@ async function renderAdminCroquis() {
             usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
         }
 
-        const miAsiento = session.asiento; 
-        const plazas = t.tipo === 'bus_50' ? 50 : (t.tipo === 'microbus_15' ? 15 : 2);
-        let html = '';
+        const miAsiento = session.asiento;
+        const transporteSel = document.getElementById('admin-vehiculo-select').value;
+        croquisDiv.innerHTML = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteSel));
 
-        if (plazas === 2) {
-            html = `
-                <div class="bus-vertical-container" style="max-width: 150px;">
-                    <div class="bus-v-front">
-                        <div class="steering-wheel-v"></div>
-                    </div>
-                    <div class="bus-v-row" style="justify-content: center;">
-                        <div class="bus-v-group">
-                            ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else if (plazas === 15) {
-            html = `<div class="bus-vertical-container">
-                        <!-- Fila 1: Volante y Copilotos -->
-                        <div class="bus-v-front">
-                            <div class="steering-wheel-v"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                                ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 2: 3 asientos -->
-                        <div class="bus-v-row">
-                            <div class="bus-v-group" style="width: 100%; justify-content: flex-end;">
-                                ${genAdminSeat(3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                                ${genAdminSeat(4, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                                ${genAdminSeat(5, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 3: 1, pasillo, 2 -->
-                        <div class="bus-v-row">
-                            ${genAdminSeat(6, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            <div class="bus-v-aisle"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(7, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                                ${genAdminSeat(8, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 4: 1, pasillo, 2 -->
-                        <div class="bus-v-row">
-                            ${genAdminSeat(9, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            <div class="bus-v-aisle"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(10, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                                ${genAdminSeat(11, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 5: 4 asientos seguidos -->
-                        <div class="bus-v-row" style="justify-content: space-between;">
-                            ${genAdminSeat(12, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            ${genAdminSeat(13, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            ${genAdminSeat(14, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                            ${genAdminSeat(15, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}
-                        </div>
-                    </div>`;
-        } else { // Bus 50
-            html = `<div class="bus-vertical-container">
-                            <div class="bus-v-front">
-                                <div class="steering-wheel-v"></div>
-                                <div style="width:40px; height:20px; background:#94a3b8; border-radius:10px;"></div>
-                            </div>`;
-                            
-            for (let i = 1; i <= plazas; i+=4) {
-                let topPair = `<div class="bus-v-group">${genAdminSeat(i, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}${genAdminSeat(i+1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}</div>`;
-                let bottomPair = '';
-                
-                if (i === 49) {
-                    bottomPair = `<div style="width: 85px; height: 42px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569;">BAÑO</div>`;
-                } else {
-                    bottomPair = `<div class="bus-v-group">${genAdminSeat(i+2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}${genAdminSeat(i+3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId)}</div>`;
-                }
-
-                html += `<div class="bus-v-row">
-                            ${topPair}
-                            <div class="bus-v-aisle"></div>
-                            ${bottomPair}
-                         </div>`;
-            }
-            
-            html += `</div>`;
-        }
-        croquisDiv.innerHTML = html;
     } catch(e) {
         console.error(e);
     }
@@ -1123,10 +1176,307 @@ function cargarSelectAdminVehiculos(transportesArray) {
     const currentVal = select.value; // Guardar estado
     select.innerHTML = '<option value="">Selecciona un vehículo...</option>';
     transportesArray.forEach((t, i) => {
-        const tipoNom = t.tipo === 'bus_50' ? 'Autobús (50)' : (t.tipo === 'microbus_15' ? 'Microbús (15)' : 'Moto');
+        const tipoNom = nombreTipoTransporte(t.tipo);
         select.innerHTML += `<option value="${t.id}">Vehículo ${i + 1} - ${tipoNom} [Viaje ${t.viaje_id.substring(0,4)}]</option>`;
     });
     if(currentVal) select.value = currentVal; // Restaurar estado
+}
+
+function renderAsignacionSuper(viajeId, transportes, anotados) {
+    const tbody = document.getElementById('tabla-asignacion-super');
+    if (!tbody) return;
+    const filtro = document.getElementById('filtro-sin-asignar');
+    let lista = (anotados || []).filter((u) => u.rol === 'estudiante');
+    if (filtro && filtro.checked) lista = lista.filter((u) => !u.transporte_id);
+    if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="3">No hay pasajeros en este filtro.</td></tr>';
+        return;
+    }
+    const cupo = {};
+    (anotados || []).forEach((u) => {
+        if (u.transporte_id) cupo[u.transporte_id] = (cupo[u.transporte_id] || 0) + 1;
+    });
+    tbody.innerHTML = '';
+    lista.forEach((u) => {
+        let opciones = '<option value="">Sin asignar</option>';
+        (transportes || []).forEach((t, i) => {
+            const plazas = plazasPorTipo(t.tipo);
+            const usados = cupo[t.id] || 0;
+            const lleno = usados >= plazas && u.transporte_id !== t.id;
+            const selected = u.transporte_id === t.id ? ' selected' : '';
+            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${nombreTipoTransporte(t.tipo)} ${i + 1} (${usados}/${plazas})</option>`;
+        });
+        tbody.innerHTML += `<tr>
+            <td>${escaparHtml(u.nombre_completo)}</td>
+            <td>${escaparHtml(u.dni || 'Menor')}</td>
+            <td><select onchange="asignarDesdeSuper('${u.id}', this.value, '${viajeId}')">${opciones}</select></td>
+        </tr>`;
+    });
+}
+
+async function asignarDesdeSuper(usuarioId, transporteId, viajeId) {
+    if (!transporteId) {
+        await quitarAlumnoDeTransporte(usuarioId, viajeId);
+        return;
+    }
+    await asignarTransporteUsuario(usuarioId, transporteId, viajeId);
+}
+
+function cargarBiblioteca() {
+    const cont = document.getElementById('lista-biblioteca');
+    if (!cont) return;
+    const data = leerBiblioteca();
+    window.bibliotecaParadas = data;
+    if (!data.length) {
+        cont.innerHTML = '<p class="text-muted">No hay paradas en la lista.</p>';
+        return;
+    }
+    cont.innerHTML = data.map((p) => {
+        const tienePunto = typeof p.lat === 'number' && typeof p.lng === 'number';
+        const detalle = tienePunto ? `${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}` : 'Sin punto. Márquela en el mapa y guárdela.';
+        const boton = tienePunto
+            ? `<button type="button" class="btn btn-auto" onclick="agregarBibliotecaARuta('${p.id}')">Agregar a este viaje</button>`
+            : `<button type="button" class="btn btn-outline btn-auto" onclick="document.getElementById('bib-nombre').value='${escaparHtml(p.nombre).replace(/'/g, '')}'">Usar este nombre</button>`;
+        return `
+        <div class="trip-item">
+            <div class="trip-info">
+                <h4>${escaparHtml(p.nombre)}</h4>
+                <p>${detalle}</p>
+            </div>
+            <div class="btn-group">
+                ${boton}
+                <button type="button" class="btn btn-outline btn-auto" onclick="eliminarDeBiblioteca('${p.id}')">Quitar de la lista</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function guardarEnBiblioteca(nombre, lat, lng) {
+    const existente = (window.bibliotecaParadas || []).find((p) => p.nombre.toLowerCase() === nombre.toLowerCase());
+    const parada = {
+        id: existente ? existente.id : ('p-' + Date.now()),
+        nombre: nombre,
+        lat: lat,
+        lng: lng
+    };
+    guardarParadaLocal(parada);
+    cargarBiblioteca();
+}
+
+function agregarBibliotecaARuta(id) {
+    const p = (window.bibliotecaParadas || []).find((x) => x.id === id);
+    if (!p || typeof p.lat !== 'number') {
+        Swal.fire('Sin punto', 'Esa parada todavía no tiene ubicación. Márquela en el mapa.', 'info');
+        return;
+    }
+    const actuales = routeControl.getWaypoints().filter((w) => w.latLng);
+    const wp = L.Routing.waypoint(L.latLng(p.lat, p.lng));
+    wp.options = { nombre: p.nombre, tiempo: '' };
+    actuales.push(wp);
+    routeControl.setWaypoints(actuales);
+}
+
+async function eliminarDeBiblioteca(id) {
+    const res = await Swal.fire({ title: 'Quitar de la lista', text: 'No se borra de los viajes que ya la usan. En este navegador deja de aparecer para viajes nuevos.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Quitar' });
+    if (!res.isConfirmed) return;
+    ocultarParadaLocal(id);
+    cargarBiblioteca();
+}
+
+async function resolverSolicitudGuardada(p, decision) {
+    const info = clasificarSolicitud(p);
+    const nuevoEstado = decision === 'aprobada'
+        ? 'aprobada'
+        : (info.tipo === 'abordaje' ? 'rechazo:' + info.nombre : 'rechazada');
+    await window.db.from('paradas_intermitentes').update({ estado: nuevoEstado }).eq('id', p.id);
+    if (decision === 'aprobada' && info.tipo === 'abordaje') {
+        await window.db.from('usuarios').update({
+            parada_id: JSON.stringify({ lat: p.lat, lng: p.lng, nombre: info.nombre || 'Punto sobre la ruta', origen: 'otro' })
+        }).eq('id', p.usuario_id);
+    }
+}
+
+async function buscarYGuardarParada() {
+    const q = document.getElementById('bib-buscar').value.trim();
+    const nombre = document.getElementById('bib-nombre').value.trim();
+    if (!q || !nombre) return Swal.fire('Datos', 'Escriba el nombre de la parada y el lugar a buscar.', 'warning');
+    try {
+        const res = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
+        const data = await res.json();
+        if (!data.length) return Swal.fire('Sin resultado', 'No se encontró ese lugar.', 'warning');
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        window.ultimoPuntoMapa = L.latLng(lat, lng);
+        routingMap.setView([lat, lng], 16);
+        await guardarEnBiblioteca(nombre, lat, lng);
+    } catch (e) {
+        Swal.fire('Búsqueda', 'No se pudo consultar el mapa.', 'error');
+    }
+}
+
+document.getElementById('btn-bib-buscar').addEventListener('click', buscarYGuardarParada);
+document.getElementById('btn-bib-mapa').addEventListener('click', () => {
+    const nombre = document.getElementById('bib-nombre').value.trim();
+    if (!nombre || !window.ultimoPuntoMapa) {
+        Swal.fire('Punto', 'Escriba el nombre y marque antes un punto en el mapa.', 'warning');
+        return;
+    }
+    guardarEnBiblioteca(nombre, window.ultimoPuntoMapa.lat, window.ultimoPuntoMapa.lng);
+});
+
+async function pintarGpsGlobal() {
+    const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado').neq('estado', 'finalizado');
+    if (!viajes || !viajes.length) return;
+    const idsViaje = viajes.map((v) => v.id);
+    const { data: trans } = await window.db.from('transportes').select('id, viaje_id, tipo').in('viaje_id', idsViaje);
+    if (!trans || !trans.length) return;
+    const { data: logs } = await window.db.from('gps_logs').select('*').limit(80);
+    if (window.marcadoresGlobales) window.marcadoresGlobales.forEach((m) => globalMap.removeLayer(m));
+    window.marcadoresGlobales = [];
+    const porTransporte = {};
+    (logs || []).forEach((g) => {
+        const prev = porTransporte[g.transporte_id];
+        if (!prev || esLecturaMasNueva(g, prev)) porTransporte[g.transporte_id] = g;
+    });
+    trans.forEach((t) => {
+        const g = porTransporte[t.id];
+        if (!g) return;
+        const viaje = viajes.find((v) => v.id === t.viaje_id);
+        const m = L.marker([g.latitud, g.longitud]).addTo(globalMap).bindPopup(`${viaje ? viaje.titulo : 'Viaje'} — ${nombreTipoTransporte(t.tipo)}`);
+        window.marcadoresGlobales.push(m);
+    });
+}
+
+async function verRutaActiva(viajeId, soloMarcadores) {
+    window.currentViajeMonitoreo = viajeId;
+    document.querySelector('.menu-item[data-target="dashboard"]').click();
+    const { data: viaje } = await window.db.from('viajes').select('*').eq('id', viajeId).single();
+    if (!viaje) return;
+    if (!soloMarcadores) {
+        if (window.rutaMonitoreo) {
+            if (window.rutaMonitoreo.getWaypoints) globalMap.removeControl(window.rutaMonitoreo);
+            else globalMap.removeLayer(window.rutaMonitoreo);
+        }
+        const puntos = puntosDeRuta(viaje.ruta);
+        if (puntos.length > 1) {
+            window.rutaMonitoreo = L.polyline(puntos.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(globalMap);
+            globalMap.fitBounds(window.rutaMonitoreo.getBounds());
+        }
+    }
+    const { data: trans } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeId);
+    const { data: logs } = await window.db.from('gps_logs').select('*').limit(80);
+    if (window.marcadoresViaje) window.marcadoresViaje.forEach((m) => globalMap.removeLayer(m));
+    window.marcadoresViaje = [];
+    const modo = modoGpsDe(viaje);
+    const propios = (logs || []).filter((g) => (trans || []).some((t) => t.id === g.transporte_id));
+    propios.sort((a, b) => esLecturaMasNueva(a, b) ? -1 : 1);
+    if (modo === 'caravana') {
+        if (propios[0]) window.marcadoresViaje.push(L.marker([propios[0].latitud, propios[0].longitud]).addTo(globalMap).bindPopup('Caravana — ' + viaje.titulo));
+    } else {
+        const visto = {};
+        propios.forEach((g) => {
+            if (visto[g.transporte_id]) return;
+            visto[g.transporte_id] = true;
+            const t = (trans || []).find((x) => x.id === g.transporte_id);
+            window.marcadoresViaje.push(L.marker([g.latitud, g.longitud]).addTo(globalMap).bindPopup(nombreTipoTransporte(t && t.tipo)));
+        });
+    }
+    setTimeout(() => globalMap.invalidateSize(), 200);
+}
+
+function etiquetaEstadoEvidencia(estado) {
+    if (estado === 'aprobada') return 'Validada para U-VIBE';
+    if (estado === 'rechazada') return 'Rechazada';
+    return 'Pendiente de revisión';
+}
+
+async function cargarEvidencias() {
+    const cont = document.getElementById('lista-evidencias');
+    const badge = document.getElementById('badge-evidencias');
+    if (!cont) return;
+    const { data, error } = await window.db.from('evidencias').select('*').order('creado_en', { ascending: false });
+    if (error) {
+        if (badge) badge.style.display = 'none';
+        cont.innerHTML = '<p class="aviso aviso-info">La revisión de fotografías estará disponible cuando se ejecute el script supabase/evidencias.sql en la base de datos.</p>';
+        return;
+    }
+    const filas = data || [];
+    window.evidenciasCache = filas;
+    const pendientes = filas.filter((e) => e.estado === 'pendiente').length;
+    if (badge) {
+        badge.style.display = pendientes ? 'inline' : 'none';
+        badge.innerText = pendientes;
+    }
+    if (!filas.length) {
+        cont.innerHTML = '<p class="text-muted">Ningún estudiante ha enviado evidencia.</p>';
+        return;
+    }
+    const ids = [...new Set(filas.map((e) => e.usuario_id))];
+    const viajeIds = [...new Set(filas.map((e) => e.viaje_id))];
+    const { data: personas } = await window.db.from('usuarios').select('id, nombre_completo').in('id', ids);
+    const { data: viajesEv } = await window.db.from('viajes').select('id, titulo').in('id', viajeIds);
+    const nombreDe = (id) => {
+        const p = (personas || []).find((u) => u.id === id);
+        return p ? p.nombre_completo : 'Estudiante';
+    };
+    const viajeDe = (id) => {
+        const v = (viajesEv || []).find((x) => x.id === id);
+        return v ? v.titulo : 'Viaje';
+    };
+    cont.innerHTML = `<div class="table-responsive"><table><thead><tr><th>Foto</th><th>Estudiante</th><th>Viaje</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${
+        filas.map((e) => {
+            const obs = e.observacion ? `<br><span class="text-muted">${escaparHtml(e.observacion)}</span>` : '';
+            const acciones = e.estado === 'aprobada'
+                ? '<span class="text-muted">Validada</span>'
+                : `<button type="button" class="btn btn-auto" onclick="verEvidencia('${e.id}')">Ver</button> <button type="button" class="btn btn-success btn-auto" onclick="resolverEvidencia('${e.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="resolverEvidencia('${e.id}', 'rechazada')">Rechazar</button>`;
+            return `<tr><td><img class="miniatura-evidencia" src="${e.imagen}" alt="Evidencia" onclick="verEvidencia('${e.id}')"></td><td>${escaparHtml(nombreDe(e.usuario_id))}</td><td>${escaparHtml(viajeDe(e.viaje_id))}${obs}</td><td>${etiquetaEstadoEvidencia(e.estado)}</td><td>${acciones}</td></tr>`;
+        }).join('')
+    }</tbody></table></div>`;
+}
+
+function verEvidencia(id) {
+    const ev = (window.evidenciasCache || []).find((e) => e.id === id);
+    if (!ev) return;
+    Swal.fire({
+        title: 'Evidencia de limpieza',
+        imageUrl: ev.imagen,
+        imageAlt: 'Fotografía enviada por el estudiante',
+        text: etiquetaEstadoEvidencia(ev.estado) + (ev.observacion ? '. ' + ev.observacion : ''),
+        width: 720
+    });
+}
+
+async function resolverEvidencia(id, estado) {
+    let observacion = null;
+    if (estado === 'rechazada') {
+        const motivo = await Swal.fire({
+            title: 'Rechazar evidencia',
+            text: 'Indique por qué no se valida. El estudiante podrá enviar otra fotografía.',
+            input: 'text',
+            inputPlaceholder: 'No se observa al estudiante recogiendo basura',
+            showCancelButton: true,
+            confirmButtonText: 'Rechazar'
+        });
+        if (!motivo.isConfirmed) return;
+        observacion = (motivo.value || '').trim() || 'La imagen no muestra la limpieza.';
+    } else {
+        const ok = await Swal.fire({
+            title: 'Validar participación',
+            text: 'Confirme que en la fotografía se ve al estudiante ayudando a recoger basura. Con esto queda acreditado para U-VIBE.',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Aprobar'
+        });
+        if (!ok.isConfirmed) return;
+    }
+    const { error } = await window.db.from('evidencias').update({
+        estado: estado,
+        observacion: observacion,
+        revisado_en: new Date().toISOString()
+    }).eq('id', id);
+    if (error) return Swal.fire('No se guardó', 'No se pudo registrar la revisión.', 'error');
+    Swal.fire('Registrado', estado === 'aprobada' ? 'La participación quedó validada.' : 'Se notificará el rechazo en el panel del estudiante.', 'success');
+    cargarEvidencias();
 }
 
 // Inicializar

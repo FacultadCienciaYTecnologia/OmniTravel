@@ -53,7 +53,7 @@ async function loadAdminDashboard() {
         }
 
         viajeIdActual = viajes[0].id;
-        window.rutaActual = viajes[0].ruta || [];
+        window.rutaActual = puntosDeRuta(viajes[0].ruta || []);
         window.viajeEstadoActual = viajes[0].estado;
         
         let label = 'Preparación';
@@ -151,8 +151,8 @@ async function loadAdminDashboard() {
         }
 
         cargarManifiesto();
-        cargarAnotadosYVehiculos(); // Cargar asignaciones manuales
-        renderAdminCroquis(); // Renderizar croquis
+        cargarSolicitudesParada();
+        renderAdminCroquis();
 
         // Si ya está en ruta, forzar encendido de GPS (visual)
         if(window.viajeEstadoActual === 'en_ruta' || window.viajeEstadoActual === 'en_ruta_ida' || window.viajeEstadoActual === 'en_ruta_vuelta') {
@@ -200,34 +200,31 @@ async function loadAdminDashboard() {
                     if(viajeIdActual) {
                         lastAdminOccupiedStr = "";
                         cargarManifiesto();
-                        cargarAnotadosYVehiculos();
                         renderAdminCroquis();
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
                     loadAdminDashboard();
                 })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
-                    // Alerta de nueva parada
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'paradas_intermitentes' }, async (payload) => {
                     const p = payload.new;
-                    if(p.viaje_id === viajeIdActual) {
-                        Swal.fire({
-                            title: 'Nueva Solicitud de Parada',
-                            text: 'Un estudiante ha solicitado una parada intermitente. ¿Deseas aprobarla?',
-                            icon: 'info',
-                            showCancelButton: true,
-                            confirmButtonText: 'Sí, aprobar',
-                            cancelButtonText: 'Rechazar'
-                        }).then(async (result) => {
-                            const nuevoEstado = result.isConfirmed ? 'aprobada' : 'rechazada';
-                            await window.db.from('paradas_intermitentes').update({estado: nuevoEstado}).eq('id', p.id);
-                            if(result.isConfirmed) {
-                                // Dibujar en mapa si fue aprobada
-                                const icon = L.divIcon({className: 'custom-div-icon', html: "<div style='background-color:#f59e0b; border-radius:50%; width:15px; height:15px; border:2px solid white;'></div>", iconSize: [15,15]});
-                                L.marker([p.lat, p.lng], {icon: icon}).addTo(map).bindPopup("Parada Intermitente");
-                            }
-                        });
-                    }
+                    if (p.viaje_id !== viajeIdActual) return;
+                    const info = clasificarSolicitud(p);
+                    const { data: u } = await window.db.from('usuarios').select('nombre_completo').eq('id', p.usuario_id).maybeSingle();
+                    const nombre = u ? u.nombre_completo : 'Un estudiante';
+                    const tipoTxt = info.tipo === 'abordaje' ? 'subirse' : 'una parada durante el recorrido';
+                    const lugar = info.nombre ? ' en ' + info.nombre : '';
+                    Swal.fire({
+                        title: 'Solicitud de parada',
+                        text: nombre + ' solicitó ' + tipoTxt + lugar + '.',
+                        icon: 'info',
+                        showCancelButton: true,
+                        confirmButtonText: 'Aprobar',
+                        cancelButtonText: 'Rechazar'
+                    }).then(async (result) => {
+                        await resolverSolicitud(p, result.isConfirmed ? 'aprobada' : 'rechazada');
+                    });
+                    cargarSolicitudesParada();
                 })
                 .subscribe();
         }
@@ -289,7 +286,7 @@ async function cargarManifiesto() {
             }
         }
 
-        const phoneLink = p.telefono ? `<a href="tel:${p.telefono}" class="btn btn-outline" style="padding:2px 5px; font-size:0.75rem; border-color:var(--accent); color:var(--accent);">📞 Llamar</a>` : '-';
+        const phoneLink = p.telefono ? `<a href="tel:${p.telefono}" class="btn btn-outline btn-auto">Llamar</a>` : '-';
         
         let actionHtml = '-';
         if (p.rol === 'admin' || p.rol === 'superadmin') {
@@ -489,6 +486,62 @@ function desactivarGPS() {
     if(marker) { map.removeLayer(marker); marker = null; }
 }
 
+async function cargarSolicitudesParada() {
+    const tbody = document.getElementById('paradas-tbody');
+    const panel = document.getElementById('panel-paradas');
+    if (!tbody || !viajeIdActual) return;
+    if (panel) panel.style.display = 'block';
+    const { data: sols } = await window.db.from('paradas_intermitentes').select('*').eq('viaje_id', viajeIdActual);
+    if (!sols || sols.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No hay solicitudes.</td></tr>';
+        document.getElementById('count-paradas').innerText = 'Pendientes: 0';
+        return;
+    }
+    const ids = [...new Set(sols.map((s) => s.usuario_id).filter(Boolean))];
+    const { data: usuarios } = ids.length ? await window.db.from('usuarios').select('id, nombre_completo').in('id', ids) : { data: [] };
+    const nombres = {};
+    (usuarios || []).forEach((u) => { nombres[u.id] = u.nombre_completo; });
+    const pendientes = sols.filter((s) => clasificarSolicitud(s).estado === 'pendiente').length;
+    document.getElementById('count-paradas').innerText = 'Pendientes: ' + pendientes;
+    tbody.innerHTML = '';
+    sols.forEach((p) => {
+        const info = clasificarSolicitud(p);
+        const tipo = info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje';
+        const acciones = info.estado === 'pendiente'
+            ? `<button class="btn btn-success btn-auto" onclick="resolverSolicitudPorId('${p.id}', 'aprobada')">Aprobar</button> <button class="btn btn-danger btn-auto" onclick="resolverSolicitudPorId('${p.id}', 'rechazada')">Rechazar</button>`
+            : escaparHtml(info.estado);
+        tbody.innerHTML += `<tr>
+            <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
+            <td>${tipo}</td>
+            <td>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</td>
+            <td>${escaparHtml(info.estado)}</td>
+            <td>${acciones}</td>
+        </tr>`;
+    });
+}
+
+async function resolverSolicitudPorId(id, estado) {
+    const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).single();
+    if (p) await resolverSolicitud(p, estado);
+}
+
+async function resolverSolicitud(p, decision) {
+    const info = clasificarSolicitud(p);
+    const nuevoEstado = decision === 'aprobada'
+        ? 'aprobada'
+        : (info.tipo === 'abordaje' ? 'rechazo:' + info.nombre : 'rechazada');
+    await window.db.from('paradas_intermitentes').update({ estado: nuevoEstado }).eq('id', p.id);
+    if (decision === 'aprobada' && info.tipo === 'abordaje') {
+        await window.db.from('usuarios').update({
+            parada_id: JSON.stringify({ lat: p.lat, lng: p.lng, nombre: info.nombre || 'Punto sobre la ruta', origen: 'otro' })
+        }).eq('id', p.usuario_id);
+    }
+    if (decision === 'aprobada') {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup((info.nombre || 'Parada') + ' — aprobada');
+    }
+    cargarSolicitudesParada();
+}
+
 // ====== ASIGNACIÓN DE PASAJEROS ======
 async function cargarAnotadosYVehiculos() {
     const tbody = document.getElementById('table-asignacion-body');
@@ -609,97 +662,8 @@ async function renderAdminCroquis() {
             usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
         }
 
-        const miAsiento = session.asiento; 
-        const plazas = t.tipo === 'bus_50' ? 50 : (t.tipo === 'microbus_15' ? 15 : 2);
-        let html = '';
-
-        if (plazas === 2) {
-            html = `
-                <div class="bus-vertical-container" style="max-width: 150px;">
-                    <div class="bus-v-front">
-                        <div class="steering-wheel-v"></div>
-                    </div>
-                    <div class="bus-v-row" style="justify-content: center;">
-                        <div class="bus-v-group">
-                            ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else if (plazas === 15) {
-            html = `<div class="bus-vertical-container">
-                        <!-- Fila 1: Volante y Copilotos -->
-                        <div class="bus-v-front">
-                            <div class="steering-wheel-v"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                                ${genAdminSeat(2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 2: 3 asientos -->
-                        <div class="bus-v-row">
-                            <div class="bus-v-group" style="width: 100%; justify-content: flex-end;">
-                                ${genAdminSeat(3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                                ${genAdminSeat(4, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                                ${genAdminSeat(5, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 3: 1, pasillo, 2 -->
-                        <div class="bus-v-row">
-                            ${genAdminSeat(6, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            <div class="bus-v-aisle"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(7, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                                ${genAdminSeat(8, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 4: 1, pasillo, 2 -->
-                        <div class="bus-v-row">
-                            ${genAdminSeat(9, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            <div class="bus-v-aisle"></div>
-                            <div class="bus-v-group">
-                                ${genAdminSeat(10, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                                ${genAdminSeat(11, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            </div>
-                        </div>
-
-                        <!-- Fila 5: 4 asientos seguidos -->
-                        <div class="bus-v-row" style="justify-content: space-between;">
-                            ${genAdminSeat(12, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            ${genAdminSeat(13, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            ${genAdminSeat(14, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                            ${genAdminSeat(15, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}
-                        </div>
-                    </div>`;
-        } else {
-            html = `<div class="bus-vertical-container">
-                            <div class="bus-v-front">
-                                <div class="steering-wheel-v"></div>
-                                <div style="width:40px; height:20px; background:#94a3b8; border-radius:10px;"></div>
-                            </div>`;
-                            
-            for (let i = 1; i <= plazas; i+=4) {
-                let topPair = `<div class="bus-v-group">${genAdminSeat(i, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+1, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
-                let bottomPair = '';
-                
-                if (i === 49) {
-                    bottomPair = `<div style="width: 85px; height: 42px; background: #cbd5e1; border: 2px dashed #64748b; border-radius: 5px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; color:#475569;">BAÑO</div>`;
-                } else {
-                    bottomPair = `<div class="bus-v-group">${genAdminSeat(i+2, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}${genAdminSeat(i+3, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual)}</div>`;
-                }
-
-                html += `<div class="bus-v-row">
-                            ${topPair}
-                            <div class="bus-v-aisle"></div>
-                            ${bottomPair}
-                         </div>`;
-            }
-            html += `</div>`;
-        }
+        const miAsiento = session.asiento;
+        const html = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual));
         if (croquisDiv) croquisDiv.innerHTML = html;
     } catch(e) {
         console.error(e);

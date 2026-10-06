@@ -18,11 +18,24 @@ function nextStep(current, next) {
     }
 
     document.getElementById(`step-${current}`).classList.remove('active');
-    document.getElementById(`step-${next}`).classList.add('active');
+    const stepEl = document.getElementById(`step-${next}`);
+    stepEl.classList.add('active');
     
     document.getElementById(`ind-${current}`).classList.add('completed');
     document.getElementById(`ind-${current}`).classList.remove('current');
     document.getElementById(`ind-${next}`).classList.add('current');
+
+    const llevarArriba = () => {
+        window.scrollTo(0, 0);
+        if (stepEl) stepEl.scrollIntoView({ block: 'start' });
+    };
+    llevarArriba();
+    const foco = { 2: 'r-email', 3: 'r-depto' }[next];
+    if (foco) {
+        const campo = document.getElementById(foco);
+        if (campo) campo.focus({ preventScroll: true });
+    }
+    setTimeout(llevarArriba, 0);
 }
 
 function prevStep(current, prev) {
@@ -313,7 +326,7 @@ function loginDetectFaceLoop(video) {
                 
                 try {
                     // Obtener todos los descriptores de Supabase
-                    const { data: users, error } = await window.db.from('usuarios').select('id, nombre_completo, rol, face_descriptor').not('face_descriptor', 'is', null);
+                    const { data: users, error } = await window.db.from('usuarios').select('id, face_descriptor').not('face_descriptor', 'is', null);
                     
                     if(error) throw error;
 
@@ -323,21 +336,25 @@ function loginDetectFaceLoop(video) {
                         return;
                     }
 
-                    // Crear LabeledFaceDescriptors
                     const labeledDescriptors = users.map(u => {
                         const descArray = new Float32Array(u.face_descriptor);
-                        return new faceapi.LabeledFaceDescriptors(JSON.stringify(u), [descArray]);
+                        return new faceapi.LabeledFaceDescriptors(String(u.id), [descArray]);
                     });
 
-                    // Crear FaceMatcher con 0.5 de distancia máxima (tolerancia estricta)
                     const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
                     const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
 
                     if (bestMatch.label !== 'unknown') {
-                        // Match encontrado
-                        const matchedUser = JSON.parse(bestMatch.label);
-                        
-                        Swal.fire({ icon: 'success', title: 'Face ID Exitoso', text: `Bienvenido, ${matchedUser.nombre_completo}`, showConfirmButton: false, timer: 1500 }).then(() => {
+                        const { data: matchedUser, error: userError } = await window.db.from('usuarios').select('*').eq('id', bestMatch.label).single();
+                        if (userError || !matchedUser) throw userError || new Error('Usuario no encontrado');
+
+                        if (matchedUser.rol !== 'superadmin' && matchedUser.estado_aprobacion !== 'aprobado') {
+                            Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
+                            stopCamera();
+                            return;
+                        }
+
+                        Swal.fire({ icon: 'success', title: 'Ingreso confirmado', text: matchedUser.nombre_completo, showConfirmButton: false, timer: 1500 }).then(() => {
                             localStorage.setItem('omni_user', JSON.stringify(matchedUser));
                             localStorage.setItem('omni_session_time', Date.now().toString());
                             stopCamera();

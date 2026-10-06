@@ -13,13 +13,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     
     <style>
-        .login-modes { display: flex; border: 1px solid var(--card-border); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 1.5rem; }
-        .login-mode-btn { flex: 1; padding: 0.8rem; background: transparent; border: none; font-weight: 600; cursor: pointer; color: var(--text-muted); transition: var(--transition); border-radius: 0; }
-        .login-mode-btn.active { background: var(--accent); color: white; }
         #login-face { display: none; }
+        body { background: var(--paper); }
     </style>
 </head>
-<body class="flex-center" style="background: linear-gradient(135deg, #f8fafc, #e2e8f0);">
+<body class="flex-center">
 
     <div class="container animate" style="width: 100%; max-width: 450px;">
         <div class="card">
@@ -30,8 +28,9 @@
                     <path d="M9 17h6"></path>
                     <circle cx="17" cy="17" r="2"></circle>
                 </svg>
+                <span class="kicker">Transporte institucional</span>
                 <h1 style="font-size:1.8rem;">OmniTravel</h1>
-                <p>Sistema Inteligente de Transporte</p>
+                <p>Ingrese con su correo o documento. Face ID solo está disponible si registró su rostro y su cuenta ya fue aprobada.</p>
             </div>
 
             <!-- Tabs para modo de login -->
@@ -136,7 +135,7 @@
                 if (data) {
                     // Si es estudiante o admin, verificar aprobación
                     if (data.rol !== 'superadmin' && data.estado_aprobacion !== 'aprobado') {
-                        Swal.fire('Cuenta en Revisión', 'Tu cuenta aún no ha sido aprobada por la administración.', 'warning');
+                        Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
                         btn.disabled = false;
                         btn.innerText = "Ingresar al Sistema";
                         return;
