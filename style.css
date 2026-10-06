@@ -481,16 +481,16 @@ th {
     left: 12px;
     z-index: 810;
     width: auto;
-    background: var(--navy);
-    color: #fff;
-    border: 1px solid var(--gold);
+    background: rgba(72, 86, 102, 0.94);
+    color: #f7f8fa;
+    border: 1px solid rgba(255,255,255,0.28);
     padding: 0.45rem 0.85rem;
 }
 .sidebar-overlay {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(12, 35, 64, 0.45);
+    background: rgba(74, 86, 99, 0.28);
     z-index: 790;
 }
 .sidebar-overlay.abierto { display: block; }
@@ -502,33 +502,36 @@ th {
     bottom: 0;
     width: 250px;
     z-index: 800;
-    background: var(--navy);
-    color: #fff;
+    background: rgba(72, 86, 102, 0.92);
+    backdrop-filter: blur(10px);
+    color: #f7f8fa;
     padding: 1.25rem 1rem 1rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
     overflow-y: auto;
+    border-right: 1px solid rgba(255,255,255,0.16);
 }
 .sidebar .nav-brand {
-    color: #fff;
+    color: #f7f8fa;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid rgba(255,255,255,0.18);
+    border-bottom: 1px solid rgba(255,255,255,0.16);
 }
+.sidebar .nav-brand small { color: #d5dde4; }
 .sidebar-user { display: flex; align-items: center; gap: 10px; }
 .sidebar-user img {
     width: 42px;
     height: 42px;
     border-radius: 50%;
     object-fit: cover;
-    border: 2px solid var(--gold);
+    border: 2px solid rgba(255,255,255,0.55);
     background: #fff;
     flex: 0 0 auto;
 }
 .sidebar-menu { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
 .menu-item {
     padding: 0.7rem 0.85rem;
-    color: #d5dee6;
+    color: #e7edf2;
     font-weight: 600;
     cursor: pointer;
     border-left: 3px solid transparent;
@@ -537,11 +540,11 @@ th {
     gap: 8px;
 }
 .menu-item:hover, .menu-item.active {
-    background: rgba(255,255,255,0.08);
-    color: #fff;
-    border-left-color: var(--gold);
+    background: rgba(255,255,255,0.14);
+    color: #ffffff;
+    border-left-color: #d5dde4;
 }
-.menu-salir { margin-top: auto; color: #f0c8c8; }
+.menu-salir { margin-top: auto; color: #f3e4e4; }
 .main-content {
     margin-left: 250px;
     padding: 1.5rem 1.75rem 2.5rem;
