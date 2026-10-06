@@ -33,7 +33,7 @@
             border-bottom: 3px solid var(--gold);
         }
         .trip-header h2, .trip-header p, .trip-header strong { color: #fff; }
-        .bus-container { max-width: 360px; margin: 0 auto; }
+        .bus-container { width: 100%; margin: 0 auto; overflow-x: auto; }
     </style>
 </head>
 
@@ -118,7 +118,7 @@
             <div class="card mb-3">
                 <div class="seccion-titulo">
                     <h3>1. Reserva de asiento</h3>
-                    <p>Elija un asiento libre dentro del horario. Fuera de ese horario el croquis no acepta cambios.</p>
+                    <p>Elija un asiento libre dentro del horario. Fuera de ese horario el croquis no acepta cambios. El frente del vehículo está a la izquierda.</p>
                 </div>
                 <div id="seat-timer-container" class="aviso" style="display:none;"></div>
                 <div class="bus-container" id="croquis">

@@ -86,6 +86,7 @@
                 <div class="menu-item" data-target="gestion-usuarios">Gestión de Roles</div>
                 <div class="menu-item" data-target="viajes">Crear Viaje</div>
                 <div class="menu-item" data-target="gestion-viajes">Gestión de Viajes</div>
+                <div class="menu-item" data-target="asignacion">Asignación de pasajeros</div>
                 <div class="menu-item" data-target="evidencias">Evidencias <span id="badge-evidencias" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
                 <div class="menu-item menu-salir" onclick="logout()">Cerrar Sesión</div>
             </div>
@@ -268,7 +269,7 @@
                         <h3 class="mb-2">Visor de Croquis (Asignaciones)</h3>
                         <button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='none'">Cerrar</button>
                     </div>
-                    <p class="text-muted mb-3">Como administrador, puedes apartar tu asiento inmediatamente ignorando los horarios.</p>
+                    <p class="text-muted mb-3">Puede apartar su asiento sin esperar el horario de los estudiantes. El frente del vehículo queda a la izquierda.</p>
                     
                     <div class="grid grid-2">
                         <div>
@@ -279,8 +280,42 @@
                         </div>
                     </div>
                     
-                    <div class="mt-3" id="admin-croquis" style="margin:0 auto; display:flex; justify-content:center; align-items:center;">
+                    <div class="mt-3" id="admin-croquis" style="width:100%; overflow-x:auto;">
                         <div class="text-muted">Selecciona un vehículo para ver los asientos.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="asignacion" class="tab-content">
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 class="mb-2">Asignación de pasajeros</h3>
+                    <p class="text-muted mb-3">Aquí están todos los estudiantes aprobados. Elija el viaje y, en cada persona, la unidad en la que viaja. El cupo aparece en la lista. Quien no se ha anotado también se puede asignar.</p>
+                    <div class="grid grid-2 mb-3">
+                        <div>
+                            <label for="asig-viaje">Viaje</label>
+                            <select id="asig-viaje" onchange="pintarAsignacion()"></select>
+                        </div>
+                        <div>
+                            <label for="asig-buscar">Buscar</label>
+                            <input type="text" id="asig-buscar" placeholder="Nombre o documento" oninput="pintarAsignacion(true)">
+                        </div>
+                    </div>
+                    <label class="checkbox-group" style="margin-bottom:1rem;"><input type="checkbox" id="asig-sin-unidad" onchange="pintarAsignacion(true)"> Solo quienes no tienen transporte en este viaje</label>
+                    <div id="asig-resumen" class="mb-3"></div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Estudiante</th>
+                                    <th>Documento</th>
+                                    <th>Situación</th>
+                                    <th>Transporte</th>
+                                </tr>
+                            </thead>
+                            <tbody id="asig-tbody">
+                                <tr><td colspan="4">Seleccione un viaje.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -338,21 +373,10 @@
                         <!-- Dinámico -->
                     </div>
 
-                    <hr class="mb-3">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
-                        <h3>Asignación de pasajeros</h3>
-                        <label class="checkbox-group" style="margin:0;"><input type="checkbox" id="filtro-sin-asignar" onchange="cargarTransportesModal(document.getElementById('t-viaje-id').value)"> Solo sin asignar</label>
-                    </div>
-                    <p class="ayuda">Solo el superadministrador asigna la unidad. El cupo se muestra en cada opción.</p>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr><th>Pasajero</th><th>Documento</th><th>Unidad</th></tr>
-                            </thead>
-                            <tbody id="tabla-asignacion-super">
-                                <tr><td colspan="3">Abra un viaje para asignar.</td></tr>
-                            </tbody>
-                        </table>
+                    <div class="aviso aviso-info" style="margin-top:1rem;">
+                        <strong>Pasajeros</strong>
+                        <p>La lista de personas y la unidad de cada una está en Asignación de pasajeros, en el menú lateral.</p>
+                        <button type="button" class="btn btn-auto" style="margin-top:0.6rem;" onclick="irAAsignacion(document.getElementById('t-viaje-id').value)">Abrir asignación de este viaje</button>
                     </div>
                 </div>
             </div>

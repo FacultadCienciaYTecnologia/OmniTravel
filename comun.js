@@ -107,44 +107,24 @@ function normalizarPuntos(lista) {
 }
 
 function htmlAsientos(plazas, celda) {
+    const frente = `<div class="bus-h-col bus-h-front"><span class="bus-h-frente">Frente</span><div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Chofer</span></div>`;
     if (plazas === 2) {
-        return `
-            <div class="bus-vertical-container bus-compacto">
-                <div class="bus-v-front">
-                    <div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Chofer</span></div>
-                </div>
-                <div class="bus-v-row" style="justify-content:center;">
-                    <div class="bus-v-group">${celda(1)}${celda(2)}</div>
-                </div>
-            </div>`;
+        return `<div class="croquis-scroll"><div class="bus-h bus-h-corto">${frente}</div><div class="bus-h-col">${celda(1)}${celda(2)}</div></div></div>`;
     }
     if (plazas === 16) {
-        return `<div class="bus-vertical-container">
-            <div class="bus-v-front">
-                <div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Chofer</span></div>
-                <div class="bus-v-group">${celda(1)}${celda(2)}${celda(3)}</div>
-            </div>
-            <div class="bus-v-row">
-                <div class="bus-v-group" style="width:100%; justify-content:flex-end;">${celda(4)}${celda(5)}${celda(6)}</div>
-            </div>
-            <div class="bus-v-row">${celda(7)}<div class="bus-v-aisle"></div><div class="bus-v-group">${celda(8)}${celda(9)}</div></div>
-            <div class="bus-v-row">${celda(10)}<div class="bus-v-aisle"></div><div class="bus-v-group">${celda(11)}${celda(12)}</div></div>
-            <div class="bus-v-row" style="justify-content:space-between;">${celda(13)}${celda(14)}${celda(15)}${celda(16)}</div>
-        </div>`;
+        return `<div class="croquis-scroll"><div class="bus-h">${frente}${celda(1)}${celda(2)}${celda(3)}</div>
+            <div class="bus-h-col bus-h-lado">${celda(4)}${celda(5)}${celda(6)}</div>
+            <div class="bus-h-col">${celda(7)}<div class="bus-h-aisle"></div>${celda(8)}${celda(9)}</div>
+            <div class="bus-h-col">${celda(10)}<div class="bus-h-aisle"></div>${celda(11)}${celda(12)}</div>
+            <div class="bus-h-col">${celda(13)}${celda(14)}${celda(15)}${celda(16)}</div>
+        </div></div>`;
     }
-    let html = `<div class="bus-vertical-container">
-        <div class="bus-v-front">
-            <div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Chofer</span></div>
-        </div>`;
+    let cols = '';
     for (let i = 1; i <= plazas; i += 4) {
-        const topPair = `<div class="bus-v-group">${celda(i)}${celda(i + 1)}</div>`;
-        const bottomPair = i === 49
-            ? `<div class="bus-bano">Baño</div>`
-            : `<div class="bus-v-group">${celda(i + 2)}${celda(i + 3)}</div>`;
-        html += `<div class="bus-v-row">${topPair}<div class="bus-v-aisle"></div>${bottomPair}</div>`;
+        const derecha = i === 49 ? '<div class="bus-bano">Baño</div>' : `${celda(i + 2)}${celda(i + 3)}`;
+        cols += `<div class="bus-h-col">${celda(i)}${celda(i + 1)}<div class="bus-h-aisle"></div>${derecha}</div>`;
     }
-    html += `</div>`;
-    return html;
+    return `<div class="croquis-scroll"><div class="bus-h">${frente}</div>${cols}</div></div>`;
 }
 
 function iniciarMenuLateral() {

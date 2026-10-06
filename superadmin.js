@@ -35,6 +35,7 @@ menuItems.forEach(item => {
             setTimeout(() => { globalMap.invalidateSize(); }, 100);
         }
         if(item.dataset.target === 'evidencias') cargarEvidencias();
+        if(item.dataset.target === 'asignacion') cargarAsignacionPanel();
     });
 });
 
@@ -613,7 +614,8 @@ function renderViajes(viajes) {
     
     viajes.forEach(v => {
         
-        const btnTransportes = `<button class="btn btn-primary btn-auto" onclick="abrirModalTransportes('${v.id}', '${escaparHtml(v.titulo).replace(/'/g, '')}')">Transportes y asignación</button>`;
+        const btnTransportes = `<button class="btn btn-primary btn-auto" onclick="abrirModalTransportes('${v.id}', '${escaparHtml(v.titulo).replace(/'/g, '')}')">Transportes</button>`;
+        const btnAsignar = `<button class="btn btn-outline btn-auto" onclick="irAAsignacion('${v.id}')">Asignar pasajeros</button>`;
         const btnInscripcion = v.inscripcion_abierta 
             ? `<button class="btn btn-outline error btn-auto" onclick="toggleInscripcion('${v.id}', false)">Cerrar Inscripción</button>`
             : `<button class="btn btn-success btn-auto" onclick="toggleInscripcion('${v.id}', true)">Habilitar Inscripción</button>`;
@@ -636,6 +638,7 @@ function renderViajes(viajes) {
                 </div>
                 <div class="btn-group" style="display:flex; gap:5px; flex-wrap:wrap;">
                     ${btnTransportes}
+                    ${btnAsignar}
                     ${btnMapa}
                     ${btnRestart}
                     ${btnInscripcion}
@@ -1220,6 +1223,166 @@ async function asignarDesdeSuper(usuarioId, transporteId, viajeId) {
         return;
     }
     await asignarTransporteUsuario(usuarioId, transporteId, viajeId);
+}
+
+function irAAsignacion(viajeId) {
+    window.asignacionViajeId = viajeId || '';
+    cerrarModalTransportes();
+    const item = document.querySelector('.menu-item[data-target="asignacion"]');
+    if (item) item.click();
+}
+
+async function cargarAsignacionPanel() {
+    const { data: viajes } = await window.db.from('viajes').select('id, titulo');
+    window.viajesAsignacion = viajes || [];
+    const sel = document.getElementById('asig-viaje');
+    if (!sel) return;
+    const previo = window.asignacionViajeId || sel.value;
+    sel.innerHTML = '<option value="">Seleccione un viaje</option>' + window.viajesAsignacion.map((v) => `<option value="${v.id}">${escaparHtml(v.titulo)}</option>`).join('');
+    if (previo && window.viajesAsignacion.some((v) => v.id === previo)) sel.value = previo;
+    window.personasAsignacion = null;
+    await pintarAsignacion();
+}
+
+async function pintarAsignacion(usarCache) {
+    const sel = document.getElementById('asig-viaje');
+    const resumen = document.getElementById('asig-resumen');
+    const tbody = document.getElementById('asig-tbody');
+    if (!sel || !tbody) return;
+    const viajeId = sel.value;
+    window.asignacionViajeId = viajeId;
+    if (!viajeId) {
+        if (resumen) resumen.innerHTML = '';
+        tbody.innerHTML = '<tr><td colspan="4">Seleccione un viaje.</td></tr>';
+        return;
+    }
+    if (!usarCache || !window.personasAsignacion) {
+        const consultaT = window.db.from('transportes').select('id, tipo, viaje_id').eq('viaje_id', viajeId);
+        const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje').eq('rol', 'estudiante').eq('estado_aprobacion', 'aprobado');
+        const consultaV = window.db.from('viajes').select('id, titulo');
+        const [tRes, pRes, vRes] = await Promise.all([consultaT, consultaP, consultaV]);
+        window.transportesAsignacion = tRes.data || [];
+        window.personasAsignacion = pRes.data || [];
+        if (vRes.data) window.viajesAsignacion = vRes.data;
+    }
+    const transportes = window.transportesAsignacion || [];
+    const q = ((document.getElementById('asig-buscar') || {}).value || '').trim().toLowerCase();
+    const soloSin = document.getElementById('asig-sin-unidad') && document.getElementById('asig-sin-unidad').checked;
+    const idsUnidad = new Set(transportes.map((t) => t.id));
+    const cupo = {};
+    (window.personasAsignacion || []).forEach((u) => {
+        if (u.transporte_id && idsUnidad.has(u.transporte_id)) cupo[u.transporte_id] = (cupo[u.transporte_id] || 0) + 1;
+    });
+    if (resumen) {
+        resumen.innerHTML = transportes.length
+            ? '<div class="btn-group">' + transportes.map((t, i) => `<span class="badge" style="background:#f4f7fa;color:#0c2340;border:1px solid #cfd6de;">${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1}: ${cupo[t.id] || 0}/${plazasPorTipo(t.tipo)}</span>`).join('') + '</div>'
+            : '<p class="aviso aviso-info">Este viaje no tiene transportes. Créelos en Gestión de Viajes con el botón Transportes.</p>';
+    }
+    let lista = (window.personasAsignacion || []).slice().sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo), 'es'));
+    if (q) lista = lista.filter((u) => String(u.nombre_completo || '').toLowerCase().includes(q) || String(u.dni || '').toLowerCase().includes(q));
+    if (soloSin) lista = lista.filter((u) => !u.transporte_id || !idsUnidad.has(u.transporte_id));
+    if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="4">No hay estudiantes en este filtro.</td></tr>';
+        return;
+    }
+    const tituloViaje = (id) => {
+        const v = (window.viajesAsignacion || []).find((x) => x.id === id);
+        return v ? v.titulo : 'Otro viaje';
+    };
+    tbody.innerHTML = lista.map((u) => {
+        let situacion = 'Sin viaje';
+        if (u.viaje_id === viajeId && idsUnidad.has(u.transporte_id)) situacion = 'Asignado en este viaje';
+        else if (u.viaje_id === viajeId) situacion = 'Anotado, sin transporte';
+        else if (u.viaje_id) situacion = 'En otro viaje: ' + tituloViaje(u.viaje_id);
+        const enEstaUnidad = idsUnidad.has(u.transporte_id);
+        let opciones = '<option value="">Sin transporte</option>';
+        if (u.transporte_id && !enEstaUnidad) {
+            opciones = '<option value="__actual" selected disabled>Asignado en otro viaje</option>' + opciones;
+        }
+        transportes.forEach((t, i) => {
+            const plazas = plazasPorTipo(t.tipo);
+            const usados = cupo[t.id] || 0;
+            const lleno = usados >= plazas && u.transporte_id !== t.id;
+            const selected = u.transporte_id === t.id ? ' selected' : '';
+            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1} (${usados}/${plazas})</option>`;
+        });
+        return `<tr>
+            <td>${escaparHtml(u.nombre_completo)}</td>
+            <td>${escaparHtml(u.dni || 'Menor')}</td>
+            <td>${escaparHtml(situacion)}</td>
+            <td><select onchange="asignarDesdePanel('${u.id}', this.value)">${opciones}</select></td>
+        </tr>`;
+    }).join('');
+}
+
+async function asignarDesdePanel(usuarioId, transporteId) {
+    const viajeId = document.getElementById('asig-viaje').value;
+    const actual = (window.personasAsignacion || []).find((u) => u.id === usuarioId);
+    if (!viajeId) return;
+    try {
+        if (!transporteId || transporteId === '__actual') {
+            if (transporteId === '__actual') {
+                await pintarAsignacion(true);
+                return;
+            }
+            const sigueEnViaje = actual && actual.viaje_id === viajeId;
+            if (!sigueEnViaje && actual && actual.viaje_id) {
+                const ok = await Swal.fire({
+                    title: 'Quitar su asignación actual',
+                    text: 'Dejará el viaje en el que está y quedará sin transporte.',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Quitar asignación'
+                });
+                if (!ok.isConfirmed) {
+                    await pintarAsignacion(true);
+                    return;
+                }
+            }
+            await window.db.from('usuarios').update(sigueEnViaje
+                ? { transporte_id: null, asiento: null, estado_viaje: 'anotado' }
+                : { transporte_id: null, asiento: null, viaje_id: null, estado_viaje: 'ninguno' }
+            ).eq('id', usuarioId);
+            window.personasAsignacion = null;
+            await pintarAsignacion();
+            return;
+        }
+        if (actual && actual.viaje_id && actual.viaje_id !== viajeId) {
+            const ok = await Swal.fire({
+                title: 'Esta persona está en otro viaje',
+                text: 'Pasará a este viaje y perderá el asiento que tuviera.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Mover a este transporte'
+            });
+            if (!ok.isConfirmed) {
+                await pintarAsignacion(true);
+                return;
+            }
+        }
+        const t = (window.transportesAsignacion || []).find((x) => x.id === transporteId);
+        const usados = (window.personasAsignacion || []).filter((u) => u.transporte_id === transporteId && u.id !== usuarioId).length;
+        if (t && usados >= plazasPorTipo(t.tipo)) {
+            Swal.fire('Cupo lleno', 'Esa unidad ya no tiene lugares.', 'warning');
+            await pintarAsignacion(true);
+            return;
+        }
+        const mismo = actual && actual.transporte_id === transporteId;
+        const cambios = { transporte_id: transporteId, viaje_id: viajeId };
+        if (!mismo) {
+            cambios.asiento = null;
+            cambios.estado_viaje = 'asignado';
+        }
+        const { error } = await window.db.from('usuarios').update(cambios).eq('id', usuarioId);
+        if (error) throw error;
+        window.personasAsignacion = null;
+        await pintarAsignacion();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('No se asignó', 'No se pudo guardar el transporte.', 'error');
+        window.personasAsignacion = null;
+        await pintarAsignacion();
+    }
 }
 
 function cargarBiblioteca() {

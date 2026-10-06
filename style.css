@@ -447,25 +447,42 @@ th {
 .login-mode-btn:last-child { border-right: 0; }
 .login-mode-btn.active { background: var(--navy); color: #fff; }
 
-.bus-vertical-container {
-    width: 100%;
-    max-width: 340px;
-    margin: 0 auto;
-    padding: 12px;
+.croquis-scroll { width: 100%; overflow-x: auto; }
+.bus-h {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 10px;
+    width: max-content;
+    min-height: 220px;
+    padding: 12px 14px;
     background: #f7f8fa;
     border: 1px solid #b7c3cf;
+}
+.bus-h-corto { min-height: 0; }
+.bus-h-col {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-}
-.bus-compacto { max-width: 180px; }
-.bus-v-front {
-    display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    border-bottom: 1px dashed #b7c3cf;
-    padding-bottom: 8px;
+    gap: 4px;
+    min-width: 46px;
+    min-height: 196px;
+}
+.bus-h-corto .bus-h-col { min-height: 0; justify-content: flex-start; }
+.bus-h-front {
+    border-right: 1px dashed #b7c3cf;
+    padding-right: 10px;
+    margin-right: 2px;
+}
+.bus-h-lado { justify-content: flex-end; }
+.bus-h-aisle { width: 28px; height: 10px; }
+.bus-h-frente {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
 .puesto-chofer { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--muted); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .steering-wheel-v {
