@@ -18,6 +18,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
@@ -87,6 +88,7 @@
                 <div class="menu-item" data-target="viajes">Crear Viaje</div>
                 <div class="menu-item" data-target="gestion-viajes">Gestión de Viajes</div>
                 <div class="menu-item" data-target="asignacion">Asignación de pasajeros</div>
+                <div class="menu-item" data-target="operacion">Operación del viaje</div>
                 <div class="menu-item" data-target="evidencias">Evidencias <span id="badge-evidencias" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
                 <div class="menu-item menu-salir" onclick="logout()">Cerrar Sesión</div>
             </div>
@@ -113,6 +115,11 @@
                         <span class="text-muted" style="font-size:0.9rem; font-weight:600;">Transportes Globales</span>
                         <h3 style="color: #6366f1;" id="stat-transportes">0</h3>
                     </div>
+                </div>
+                <div class="guia mb-3">
+                    <strong>Para que el estudiante elija asiento</strong>
+                    <p>Primero cree la unidad en Gestión de Viajes, botón Transportes. Después abra Asignación de pasajeros, elija el viaje y la unidad de cada estudiante. Hasta esa asignación, el estudiante ve “pendiente de transporte”.</p>
+                    <button type="button" class="btn btn-auto" style="margin-top:0.7rem;" onclick="document.querySelector('.menu-item[data-target=asignacion]').click()">Ir a asignación de pasajeros</button>
                 </div>
                 <div class="card" style="padding: 1.5rem;">
                     <h3 class="mb-2">GPS Global en Tiempo Real</h3>
@@ -274,7 +281,7 @@
                     <div class="grid grid-2">
                         <div>
                             <label>Selecciona Vehículo</label>
-                            <select id="admin-vehiculo-select" onchange="renderAdminCroquis()">
+                            <select id="admin-vehiculo-select" onchange="renderAdminCroquis('admin')">
                                 <!-- Dinámico -->
                             </select>
                         </div>
@@ -317,6 +324,63 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <div id="operacion" class="tab-content">
+                <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
+                    <h3 class="mb-2">Operación del viaje</h3>
+                    <p class="text-muted mb-3">Desde aquí el superadministrador puede hacer lo mismo que el chofer, en cualquier unidad: iniciar la ruta, transmitir GPS, ver el manifiesto, aprobar paradas y apartar asiento.</p>
+                    <div class="grid grid-2">
+                        <div>
+                            <label for="op-viaje">Viaje</label>
+                            <select id="op-viaje" onchange="cargarOperacion()"></select>
+                        </div>
+                        <div>
+                            <label for="op-transporte">Unidad</label>
+                            <select id="op-transporte" onchange="cargarOperacionUnidad()"></select>
+                        </div>
+                    </div>
+                    <p class="mt-2"><span class="badge" id="op-estado" style="background:#e0e7ff; color:#4338ca;">Sin viaje</span></p>
+                    <div class="btn-group mt-2">
+                        <button type="button" class="btn btn-success btn-auto" id="op-btn-iniciar" onclick="operacionIniciar()">Iniciar ruta</button>
+                        <button type="button" class="btn btn-danger btn-auto" id="op-btn-finalizar" style="display:none;" onclick="operacionFinalizar()">Llegamos al destino</button>
+                    </div>
+                    <div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; gap:1rem; background:#f8fafc; border:1px solid var(--line); padding:0.8rem 1rem;">
+                        <div>
+                            <strong id="op-gps-texto">GPS inactivo</strong>
+                            <p class="ayuda" style="margin:0;">La ubicación se publica como la unidad elegida arriba.</p>
+                        </div>
+                        <label class="checkbox-group" style="margin:0;"><input type="checkbox" id="op-gps" onchange="operacionGps(this.checked)"> Transmitir</label>
+                    </div>
+                </div>
+                <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
+                    <h3 class="mb-2">Recorrido</h3>
+                    <div id="op-map"></div>
+                </div>
+                <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
+                    <h3 class="mb-2">Manifiesto de la unidad</h3>
+                    <p id="op-abordo" class="text-muted mb-2">A bordo: 0</p>
+                    <div class="table-responsive">
+                        <table>
+                            <thead><tr><th>Pasajero</th><th>Asiento</th><th>Parada</th><th>Estado</th><th>Acción</th></tr></thead>
+                            <tbody id="op-manifiesto"><tr><td colspan="5">Elija una unidad.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
+                    <h3 class="mb-2">Solicitudes de parada</h3>
+                    <div class="table-responsive">
+                        <table>
+                            <thead><tr><th>Estudiante</th><th>Tipo</th><th>Lugar</th><th>Estado</th><th>Acción</th></tr></thead>
+                            <tbody id="op-paradas"><tr><td colspan="5">Elija un viaje.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card" style="padding:1.5rem;">
+                    <h3 class="mb-2">Asientos de la unidad</h3>
+                    <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. El frente queda a la izquierda.</p>
+                    <div id="op-croquis" style="width:100%; overflow-x:auto;"><p class="text-muted">Elija una unidad.</p></div>
                 </div>
             </div>
 

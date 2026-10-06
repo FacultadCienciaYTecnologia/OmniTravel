@@ -45,7 +45,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             }
         }
 
-        const estado = session.estado_viaje || 'ninguno';
+        let estado = session.estado_viaje || 'ninguno';
 
         if (estado === 'ninguno' || !session.viaje_id) {
             // == VISTA DE LOBBY (Lista de Viajes) ==
@@ -152,6 +152,13 @@ async function loadEstudianteDashboard(skipFetch = false) {
             const guia = document.getElementById('guia-estudiante');
             const panelParada = document.getElementById('panel-parada');
             if (panelParada) panelParada.style.display = estado === 'asiento_elegido' ? 'block' : 'none';
+
+            if (session.transporte_id && estado === 'anotado') {
+                estado = 'asignado';
+                session.estado_viaje = 'asignado';
+                localStorage.setItem('omni_user', JSON.stringify(session));
+                window.db.from('usuarios').update({ estado_viaje: 'asignado' }).eq('id', session.id);
+            }
 
             if (estado === 'anotado') {
                 document.getElementById('v-transporte').innerText = 'Transporte: pendiente de asignación';

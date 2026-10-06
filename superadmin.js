@@ -36,6 +36,7 @@ menuItems.forEach(item => {
         }
         if(item.dataset.target === 'evidencias') cargarEvidencias();
         if(item.dataset.target === 'asignacion') cargarAsignacionPanel();
+        if(item.dataset.target === 'operacion') cargarOperacion();
     });
 });
 
@@ -135,7 +136,7 @@ async function loadDashboard() {
                     // Actualizar croquis en tiempo real si el superadmin lo está viendo
                     if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
                         lastAdminOccupiedStr = "";
-                        renderAdminCroquis();
+                        renderAdminCroquis(window.croquisOrigen || 'admin');
                     }
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
@@ -1008,9 +1009,13 @@ let adminCroquisInterval = null;
 let lastAdminOccupiedStr = "";
 
 // ====== VIP CROQUIS ======
-async function renderAdminCroquis() {
-    const transporteId = document.getElementById('admin-vehiculo-select').value;
-    const croquisDiv = document.getElementById('admin-croquis');
+async function renderAdminCroquis(origen) {
+    if (origen === 'operacion' || origen === 'admin') window.croquisOrigen = origen;
+    const desdeOperacion = window.croquisOrigen === 'operacion';
+    const selCroquis = document.getElementById(desdeOperacion ? 'op-transporte' : 'admin-vehiculo-select');
+    const transporteId = selCroquis ? selCroquis.value : '';
+    const croquisDiv = document.getElementById(desdeOperacion ? 'op-croquis' : 'admin-croquis');
+    if (!croquisDiv) return;
     
     if(!transporteId) {
         croquisDiv.innerHTML = '<div class="text-muted">Selecciona un vehículo para ver los asientos.</div>';
@@ -1101,7 +1106,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('Liberado', 'Tu asiento VIP ha sido liberado.', 'success');
                     lastAdminOccupiedStr = "";
-                    renderAdminCroquis();
+                    renderAdminCroquis(window.croquisOrigen || 'admin');
                 } catch(e) {}
             }
         });
@@ -1124,11 +1129,11 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                     lastAdminOccupiedStr = "";
-                    renderAdminCroquis();
+                    renderAdminCroquis(window.croquisOrigen || 'admin');
                 } catch(e) {
                     Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
                     lastAdminOccupiedStr = "";
-                    renderAdminCroquis();
+                    renderAdminCroquis(window.croquisOrigen || 'admin');
                 }
             }
         });
@@ -1167,7 +1172,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                 
                 Swal.fire('¡Éxito!', 'Asiento reservado.', 'success');
                 lastAdminOccupiedStr = "";
-                renderAdminCroquis();
+                renderAdminCroquis(window.croquisOrigen || 'admin');
             } catch(e) { Swal.fire('Error', 'Fallo al reservar.', 'error'); }
         }
     });
@@ -1258,7 +1263,7 @@ async function pintarAsignacion(usarCache) {
     }
     if (!usarCache || !window.personasAsignacion) {
         const consultaT = window.db.from('transportes').select('id, tipo, viaje_id').eq('viaje_id', viajeId);
-        const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje').eq('rol', 'estudiante').eq('estado_aprobacion', 'aprobado');
+        const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje, estado_aprobacion').eq('rol', 'estudiante');
         const consultaV = window.db.from('viajes').select('id, titulo');
         const [tRes, pRes, vRes] = await Promise.all([consultaT, consultaP, consultaV]);
         window.transportesAsignacion = tRes.data || [];
@@ -1294,6 +1299,7 @@ async function pintarAsignacion(usarCache) {
         if (u.viaje_id === viajeId && idsUnidad.has(u.transporte_id)) situacion = 'Asignado en este viaje';
         else if (u.viaje_id === viajeId) situacion = 'Anotado, sin transporte';
         else if (u.viaje_id) situacion = 'En otro viaje: ' + tituloViaje(u.viaje_id);
+        if (u.estado_aprobacion && u.estado_aprobacion !== 'aprobado') situacion += ' · cuenta sin aprobar';
         const enEstaUnidad = idsUnidad.has(u.transporte_id);
         let opciones = '<option value="">Sin transporte</option>';
         if (u.transporte_id && !enEstaUnidad) {
@@ -1367,9 +1373,11 @@ async function asignarDesdePanel(usuarioId, transporteId) {
             await pintarAsignacion(true);
             return;
         }
-        const mismo = actual && actual.transporte_id === transporteId;
+        const mismo = actual && actual.transporte_id === transporteId && actual.viaje_id === viajeId;
         const cambios = { transporte_id: transporteId, viaje_id: viajeId };
-        if (!mismo) {
+        if (mismo && actual.estado_viaje === 'asiento_elegido') {
+            /* conserva el asiento ya elegido en esta misma unidad */
+        } else {
             cambios.asiento = null;
             cambios.estado_viaje = 'asignado';
         }
@@ -1377,6 +1385,7 @@ async function asignarDesdePanel(usuarioId, transporteId) {
         if (error) throw error;
         window.personasAsignacion = null;
         await pintarAsignacion();
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Transporte asignado. El estudiante ya puede elegir asiento.', showConfirmButton: false, timer: 2200 });
     } catch (e) {
         console.error(e);
         Swal.fire('No se asignó', 'No se pudo guardar el transporte.', 'error');
@@ -1640,6 +1649,222 @@ async function resolverEvidencia(id, estado) {
     if (error) return Swal.fire('No se guardó', 'No se pudo registrar la revisión.', 'error');
     Swal.fire('Registrado', estado === 'aprobada' ? 'La participación quedó validada.' : 'Se notificará el rechazo en el panel del estudiante.', 'success');
     cargarEvidencias();
+}
+
+const opNoSleep = (typeof NoSleep !== 'undefined') ? new NoSleep() : { enable() {}, disable() {} };
+let opMap = null;
+let opMarker = null;
+let opWatch = null;
+
+function asegurarMapaOperacion() {
+    const caja = document.getElementById('op-map');
+    if (!caja) return;
+    if (!opMap) {
+        opMap = L.map('op-map').setView([13.6929, -89.2182], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(opMap);
+    }
+    setTimeout(() => opMap.invalidateSize(), 200);
+}
+
+async function cargarOperacion() {
+    asegurarMapaOperacion();
+    const sel = document.getElementById('op-viaje');
+    if (!sel) return;
+    const previo = sel.value || window.operacionViajeId || '';
+    const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, ruta');
+    window.operacionViajes = viajes || [];
+    sel.innerHTML = '<option value="">Seleccione un viaje</option>' + window.operacionViajes.map((v) => `<option value="${v.id}">${escaparHtml(v.titulo)}</option>`).join('');
+    if (previo && window.operacionViajes.some((v) => v.id === previo)) sel.value = previo;
+    window.operacionViajeId = sel.value;
+    const viaje = window.operacionViajes.find((v) => v.id === sel.value);
+    const unidad = document.getElementById('op-transporte');
+    unidad.innerHTML = '<option value="">Seleccione una unidad</option>';
+    if (!viaje) {
+        document.getElementById('op-estado').innerText = 'Sin viaje';
+        return;
+    }
+    window.rutaOperacion = puntosDeRuta(viaje.ruta);
+    pintarEstadoOperacion(viaje.estado);
+    dibujarRutaOperacion();
+    const { data: unidades } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viaje.id);
+    window.operacionUnidades = unidades || [];
+    window.operacionUnidades.forEach((t, i) => {
+        unidad.innerHTML += `<option value="${t.id}">${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1}</option>`;
+    });
+    if (window.operacionTransporteId && window.operacionUnidades.some((t) => t.id === window.operacionTransporteId)) {
+        unidad.value = window.operacionTransporteId;
+    }
+    await cargarOperacionUnidad();
+    await cargarParadasOperacion();
+}
+
+function pintarEstadoOperacion(estado) {
+    window.operacionEstado = estado || 'preparacion';
+    const etiqueta = document.getElementById('op-estado');
+    const iniciar = document.getElementById('op-btn-iniciar');
+    const finalizar = document.getElementById('op-btn-finalizar');
+    const nombres = { preparacion: 'Preparación', en_ruta: 'Ruta de ida', en_ruta_ida: 'Ruta de ida', espera_vuelta: 'Esperando el regreso', en_ruta_vuelta: 'Ruta de vuelta', finalizado: 'Finalizado' };
+    if (etiqueta) etiqueta.innerText = nombres[window.operacionEstado] || window.operacionEstado;
+    const enIda = window.operacionEstado === 'en_ruta' || window.operacionEstado === 'en_ruta_ida';
+    const enVuelta = window.operacionEstado === 'en_ruta_vuelta';
+    if (iniciar) {
+        iniciar.style.display = (enIda || enVuelta || window.operacionEstado === 'finalizado') ? 'none' : 'inline-block';
+        iniciar.innerText = window.operacionEstado === 'espera_vuelta' ? 'Iniciar regreso' : 'Iniciar ruta';
+    }
+    if (finalizar) {
+        finalizar.style.display = (enIda || enVuelta) ? 'inline-block' : 'none';
+        finalizar.innerText = enVuelta ? 'Finalizar viaje' : 'Llegamos al destino';
+    }
+}
+
+function dibujarRutaOperacion() {
+    if (!opMap) return;
+    if (window.opRuta) opMap.removeLayer(window.opRuta);
+    const puntos = window.rutaOperacion || [];
+    if (puntos.length < 2) return;
+    window.opRuta = L.polyline(puntos.map((p) => [p.lat, p.lng]), { color: '#0e4c81', weight: 4 }).addTo(opMap);
+    opMap.fitBounds(window.opRuta.getBounds(), { padding: [20, 20] });
+}
+
+async function cargarOperacionUnidad() {
+    const transporteId = document.getElementById('op-transporte').value;
+    window.operacionTransporteId = transporteId;
+    const tbody = document.getElementById('op-manifiesto');
+    if (!transporteId) {
+        tbody.innerHTML = '<tr><td colspan="5">Elija una unidad.</td></tr>';
+        document.getElementById('op-abordo').innerText = 'A bordo: 0';
+        return;
+    }
+    const viajeId = document.getElementById('op-viaje').value;
+    const { data: pasajeros } = await window.db.from('usuarios').select('id, nombre_completo, asiento, parada_id, abordo, asistencia_cancelada, rol').eq('viaje_id', viajeId).eq('transporte_id', transporteId);
+    const lista = pasajeros || [];
+    const aBordo = lista.filter((p) => p.abordo).length;
+    document.getElementById('op-abordo').innerText = 'A bordo: ' + aBordo + ' / ' + lista.length;
+    if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="5">Esta unidad no tiene pasajeros. Asígnelos en Asignación de pasajeros.</td></tr>';
+    } else {
+        tbody.innerHTML = lista.map((p) => {
+            const parada = leerParada(p.parada_id, window.rutaOperacion);
+            const estado = p.asistencia_cancelada ? 'Canceló' : (p.abordo ? 'A bordo' : 'Pendiente');
+            const accion = (p.rol === 'admin' || p.rol === 'superadmin')
+                ? `<button type="button" class="btn btn-outline btn-auto" onclick="operacionAbordo('${p.id}', ${p.abordo ? 'false' : 'true'})">${p.abordo ? 'Bajar' : 'Marcar a bordo'}</button>`
+                : '—';
+            return `<tr><td>${escaparHtml(p.nombre_completo)}</td><td>${escaparHtml(p.asiento || '—')}</td><td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td><td>${estado}</td><td>${accion}</td></tr>`;
+        }).join('');
+    }
+    renderAdminCroquis('operacion');
+}
+
+async function operacionAbordo(id, abordo) {
+    await window.db.from('usuarios').update({ abordo: abordo === true || abordo === 'true', asistencia_cancelada: false }).eq('id', id);
+    cargarOperacionUnidad();
+}
+
+async function cargarParadasOperacion() {
+    const tbody = document.getElementById('op-paradas');
+    const viajeId = document.getElementById('op-viaje').value;
+    if (!viajeId) {
+        tbody.innerHTML = '<tr><td colspan="5">Elija un viaje.</td></tr>';
+        return;
+    }
+    const { data: sols } = await window.db.from('paradas_intermitentes').select('*').eq('viaje_id', viajeId);
+    const filas = sols || [];
+    if (!filas.length) {
+        tbody.innerHTML = '<tr><td colspan="5">Sin solicitudes.</td></tr>';
+        return;
+    }
+    const ids = [...new Set(filas.map((s) => s.usuario_id).filter(Boolean))];
+    const { data: personas } = ids.length ? await window.db.from('usuarios').select('id, nombre_completo').in('id', ids) : { data: [] };
+    const nombres = {};
+    (personas || []).forEach((u) => { nombres[u.id] = u.nombre_completo; });
+    tbody.innerHTML = filas.map((p) => {
+        const info = clasificarSolicitud(p);
+        const acciones = info.estado === 'pendiente'
+            ? `<button type="button" class="btn btn-success btn-auto" onclick="operacionResolverParada('${p.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="operacionResolverParada('${p.id}', 'rechazada')">Rechazar</button>`
+            : escaparHtml(info.estado);
+        return `<tr><td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td><td>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</td><td>${escaparHtml(info.nombre || 'Punto')}</td><td>${escaparHtml(info.estado)}</td><td>${acciones}</td></tr>`;
+    }).join('');
+}
+
+async function operacionResolverParada(id, decision) {
+    const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).single();
+    if (p) await resolverSolicitudGuardada(p, decision);
+    cargarParadasOperacion();
+}
+
+async function operacionIniciar() {
+    const viajeId = document.getElementById('op-viaje').value;
+    const transporteId = document.getElementById('op-transporte').value;
+    if (!viajeId || !transporteId) return Swal.fire('Unidad', 'Elija el viaje y la unidad que va a operar.', 'warning');
+    if (!window.rutaOperacion || window.rutaOperacion.length < 2) return Swal.fire('Ruta', 'Este viaje no tiene recorrido.', 'warning');
+    if (!navigator.geolocation) return Swal.fire('GPS', 'Este navegador no entrega la ubicación.', 'error');
+    const regreso = window.operacionEstado === 'espera_vuelta';
+    Swal.fire({ title: 'Comprobando ubicación', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        if (!regreso) {
+            const origen = window.rutaOperacion[0];
+            const dist = distanciaMetros(pos.coords.latitude, pos.coords.longitude, origen.lat, origen.lng);
+            if (dist > 25) {
+                Swal.fire('Lejos del origen', 'Para iniciar la ida hay que estar a 25 metros o menos del primer punto. Está a ' + Math.round(dist) + ' metros.', 'warning');
+                return;
+            }
+        }
+        const estado = regreso ? 'en_ruta_vuelta' : 'en_ruta_ida';
+        const { error } = await window.db.from('viajes').update({ estado: estado }).eq('id', viajeId);
+        if (error) return Swal.fire('No se inició', 'No se pudo cambiar el estado del viaje.', 'error');
+        opNoSleep.enable();
+        document.getElementById('op-gps').checked = true;
+        operacionGps(true);
+        Swal.fire('Ruta en curso', regreso ? 'El regreso quedó iniciado.' : 'La ida quedó iniciada y el GPS se está enviando.', 'success');
+        cargarOperacion();
+    }, () => Swal.fire('GPS', 'No se obtuvo la ubicación.', 'error'), { enableHighAccuracy: true });
+}
+
+async function operacionFinalizar() {
+    const viajeId = document.getElementById('op-viaje').value;
+    if (!viajeId) return;
+    const enVuelta = window.operacionEstado === 'en_ruta_vuelta';
+    const cambios = enVuelta ? { estado: 'finalizado', inscripcion_abierta: false } : { estado: 'espera_vuelta' };
+    const { error } = await window.db.from('viajes').update(cambios).eq('id', viajeId);
+    if (error) return Swal.fire('No se guardó', 'No se pudo actualizar el viaje.', 'error');
+    document.getElementById('op-gps').checked = false;
+    operacionGps(false);
+    opNoSleep.disable();
+    Swal.fire(enVuelta ? 'Viaje terminado' : 'Destino alcanzado', enVuelta ? 'El viaje quedó finalizado.' : 'El GPS se pausó. Puede iniciar el regreso cuando corresponda.', 'success');
+    cargarOperacion();
+}
+
+function operacionGps(activo) {
+    const texto = document.getElementById('op-gps-texto');
+    if (opWatch) {
+        navigator.geolocation.clearWatch(opWatch);
+        opWatch = null;
+    }
+    if (!activo) {
+        if (texto) texto.innerText = 'GPS inactivo';
+        return;
+    }
+    const transporteId = document.getElementById('op-transporte').value;
+    if (!transporteId) {
+        document.getElementById('op-gps').checked = false;
+        Swal.fire('Unidad', 'Elija la unidad que va a transmitir.', 'warning');
+        return;
+    }
+    if (!navigator.geolocation) return;
+    if (texto) texto.innerText = 'Transmitiendo';
+    opNoSleep.enable();
+    opWatch = navigator.geolocation.watchPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (opMap) {
+            if (!opMarker) opMarker = L.circleMarker([lat, lng], { radius: 7, color: '#0c2340', fillColor: '#8d7340', fillOpacity: 1 }).addTo(opMap);
+            else opMarker.setLatLng([lat, lng]);
+        }
+        await window.db.from('gps_logs').insert([{ transporte_id: transporteId, latitud: lat, longitud: lng, velocidad: pos.coords.speed || 0 }]);
+    }, () => {
+        if (texto) texto.innerText = 'GPS inactivo';
+        document.getElementById('op-gps').checked = false;
+    }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 });
 }
 
 // Inicializar
