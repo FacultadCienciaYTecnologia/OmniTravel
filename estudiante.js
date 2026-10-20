@@ -446,7 +446,7 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     lastOccupiedStr = occupiedStr;
 
     if(usuarios) {
-        usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
+        usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; }); window.asientosOcupadosEstudiante = asientosOcupadosInfo;
     }
 
     const miAsiento = session.asiento;
@@ -507,13 +507,38 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         return;
     }
 
+    // Identificar el asiento contiguo (pareja de limpieza)
+    const parejaNumero = (numero % 2 === 1) ? numero + 1 : numero - 1;
+    const ocupanteParejaObj = window.asientosOcupadosEstudiante && window.asientosOcupadosEstudiante[parejaNumero.toString()];
+    const estadoParejaHtml = ocupanteParejaObj 
+        ? `<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 10px; margin-top:10px; font-size:0.88rem; color:#166534;">
+             👥 <b>Asiento contiguo (${parejaNumero}):</b> Reservado por <b>${escaparHtml(ocupanteParejaObj.nombre_completo)}</b>. ¡Será tu pareja para la limpieza!
+           </div>`
+        : `<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; margin-top:10px; font-size:0.88rem; color:#475569;">
+             👥 <b>Asiento contiguo (${parejaNumero}):</b> Disponible por ahora. Quien lo elija será tu pareja de trabajo.
+           </div>`;
+
     if (session.asiento) {
         Swal.fire({
             title: `¿Cambiar al Asiento ${numero}?`,
-            text: "Tu asiento anterior quedará libre para otros.",
+            html: `
+                <div style="text-align: left; font-size: 0.95rem; line-height: 1.5;">
+                    <p>Tu asiento anterior (<b>${session.asiento}</b>) quedará libre para otros compañeros.</p>
+                    <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 10px 12px; border-radius: 4px; margin-top: 10px;">
+                        <p style="margin: 0; color: #1e40af; font-weight: 600;">🤝 Actividad en Parejas (Jornada de Limpieza):</p>
+                        <p style="margin: 4px 0 0 0; color: #1e3a8a; font-size: 0.88rem;">
+                            Recuerda que la jornada se trabajará en <b>parejas</b>. La persona sentada a tu lado será tu compañero(a) de equipo para la actividad.
+                        </p>
+                    </div>
+                    ${estadoParejaHtml}
+                </div>
+            `,
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: 'Sí, cambiar'
+            confirmButtonColor: 'var(--primary)',
+            cancelButtonColor: '#64748b',
+            confirmButtonText: 'Sí, cambiar',
+            cancelButtonText: 'Cancelar'
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
@@ -542,9 +567,24 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
 
     Swal.fire({
         title: `¿Elegir Asiento ${numero}?`,
+        html: `
+            <div style="text-align: left; font-size: 0.95rem; line-height: 1.5;">
+                <p>Estás seleccionando el <b>Asiento ${numero}</b>.</p>
+                <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 10px 12px; border-radius: 4px; margin-top: 10px;">
+                    <p style="margin: 0; color: #1e40af; font-weight: 600;">🤝 Actividad en Parejas (Jornada de Limpieza):</p>
+                    <p style="margin: 4px 0 0 0; color: #1e3a8a; font-size: 0.88rem;">
+                        Recuerda que la jornada se trabajará en <b>parejas</b>. La persona sentada a tu lado será tu compañero(a) de equipo para la actividad.
+                    </p>
+                </div>
+                ${estadoParejaHtml}
+            </div>
+        `,
         icon: 'question',
         showCancelButton: true,
-        confirmButtonText: 'Sí, elegir'
+        confirmButtonColor: 'var(--primary)',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Sí, confirmar asiento',
+        cancelButtonText: 'Cancelar'
     }).then(async (res) => {
         if(res.isConfirmed) {
             try {

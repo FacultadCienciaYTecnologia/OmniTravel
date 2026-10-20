@@ -151,22 +151,7 @@ async function loadDashboard() {
                     const p = payload.new;
                     const info = clasificarSolicitud(p);
                     if (info.estado !== 'pendiente') return;
-                    const { data: u } = await window.db.from('usuarios').select('nombre_completo').eq('id', p.usuario_id).maybeSingle();
-                    const nombre = u ? u.nombre_completo : 'Un estudiante';
-                    const tipoTxt = info.tipo === 'abordaje' ? 'subirse' : 'una parada durante el recorrido';
-                    const aviso = await Swal.fire({
-                        title: 'Solicitud de parada',
-                        text: nombre + ' solicitó ' + tipoTxt + (info.nombre ? ' en ' + info.nombre : '') + '.',
-                        icon: 'info',
-                        showDenyButton: true,
-                        showCancelButton: true,
-                        confirmButtonText: 'Aprobar',
-                        denyButtonText: 'Rechazar',
-                        cancelButtonText: 'Dejar pendiente'
-                    });
-                    if (aviso.isConfirmed) await resolverSolicitudGuardada(p, 'aprobada');
-                    else if (aviso.isDenied) await resolverSolicitudGuardada(p, 'rechazada');
-                    cargarSolicitudesSuper();
+                    await evaluarSolicitudSuper(p.id);
                 })
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
                     if (window.currentViajeMonitoreo) verRutaActiva(window.currentViajeMonitoreo, true);
@@ -778,6 +763,22 @@ function cerrarModalTransportes() {
     document.getElementById('modal-transportes').style.display = 'none';
 }
 
+// Actualizar requerimiento visual de chofer según topología (Obligatorio solo para Autobús)
+const topoSelectEl = document.getElementById('t-topologia-select');
+const badgeAdminReqEl = document.getElementById('badge-admin-req');
+if (topoSelectEl) {
+    topoSelectEl.addEventListener('change', () => {
+        if (!badgeAdminReqEl) return;
+        if (topoSelectEl.value === 'bus_50') {
+            badgeAdminReqEl.innerText = '*Requerido para Autobús';
+            badgeAdminReqEl.style.color = 'var(--error)';
+        } else {
+            badgeAdminReqEl.innerText = '(Opcional - Se guía por el bus principal)';
+            badgeAdminReqEl.style.color = '#16a34a';
+        }
+    });
+}
+
 document.getElementById('form-transporte').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
@@ -794,7 +795,15 @@ document.getElementById('form-transporte').addEventListener('submit', async (e) 
 
     const viajeId = document.getElementById('t-viaje-id').value;
     const tipo = document.getElementById('t-topologia-select').value;
-    const adminId = document.getElementById('t-admin-select').value;
+    const adminIdRaw = document.getElementById('t-admin-select').value;
+    const adminId = (adminIdRaw && adminIdRaw.trim() !== '') ? adminIdRaw.trim() : null;
+
+    // Solo el autobús de 50 plazas requiere obligatoriamente un chofer asignado para GPS
+    if (tipo === 'bus_50' && !adminId) {
+        Swal.fire('Chofer Requerido', 'Para un Autobús de 50 plazas es obligatorio asignar un Administrador/Chofer que transmita el GPS.', 'warning');
+        btn.disabled = false;
+        return;
+    }
     
     const fileInput = document.getElementById('t-file-img');
     
@@ -879,7 +888,7 @@ async function cargarTransportesModal(viajeId) {
 
         container.innerHTML = '';
         transportes.forEach((t, index) => {
-            const adminName = t.admin ? t.admin.nombre_completo : 'Sin Chofer';
+            const adminName = t.admin ? t.admin.nombre_completo : '<span style="color:#64748b; font-style:italic;">Sin chofer asignado (Sigue al bus líder)</span>';
             const imgHtml = t.imagen_url ? `<img src="${t.imagen_url}" style="width:100px; height:60px; object-fit:cover; border-radius:5px; margin-right:15px;">` : `<div style="width:100px; height:60px; background:#e2e8f0; border-radius:5px; margin-right:15px; display:flex; align-items:center; justify-content:center;">🚌</div>`;
             
             // Filtrar alumnos que ya están en este transporte
@@ -897,7 +906,7 @@ async function cargarTransportesModal(viajeId) {
                         ${imgHtml}
                         <div>
                             <h4 style="margin:0;">Vehículo #${index + 1} - ${t.tipo.toUpperCase()}</h4>
-                            <p style="margin:0; font-size:0.85rem; color:#64748b;">Chofer: ${adminName} <button class="btn btn-outline" style="padding:2px 5px; font-size:0.7rem; margin-left:5px;" onclick="cambiarChofer('${t.id}', '${t.admin_id}', '${viajeId}')">Cambiar</button></p>
+                            <p style="margin:0; font-size:0.85rem; color:#64748b;">Chofer: ${adminName} <button class="btn btn-outline" style="padding:2px 5px; font-size:0.7rem; margin-left:5px;" onclick="cambiarChofer('${t.id}', '${t.admin_id}', '${viajeId}', '${t.tipo}')">${t.admin_id ? 'Cambiar' : 'Asignar chofer'}</button></p>
                         </div>
                         <button class="btn btn-outline error" style="margin-left:auto; padding:5px 10px; font-size:0.8rem;" onclick="eliminarTransporte('${t.id}', '${viajeId}')">Eliminar</button>
                     </div>
@@ -918,31 +927,29 @@ async function cargarTransportesModal(viajeId) {
     }
 }
 
-async function cambiarChofer(transporteId, oldAdminId, viajeId) {
+async function cambiarChofer(transporteId, oldAdminId, viajeId, tipo) {
     const { data: allTransportes } = await window.db.from('transportes').select('admin_id');
     const assignedAdmins = allTransportes ? allTransportes.map(t => t.admin_id) : [];
     const { data: admins } = await window.db.from('usuarios').select('id, nombre_completo').eq('rol', 'admin');
     
     let optionsHtml = '';
-    let availableCount = 0;
+    // Para microbús o motocicleta, se permite dejar sin chofer
+    if (tipo !== 'bus_50') {
+        optionsHtml += '<option value="__none__">-- Dejar sin chofer (Opcional para este transporte) --</option>';
+    }
     if(admins) {
         admins.forEach(a => {
             if(!assignedAdmins.includes(a.id)) {
                 optionsHtml += `<option value="${a.id}">${a.nombre_completo}</option>`;
-                availableCount++;
             }
         });
     }
 
-    if (availableCount === 0) {
-        return Swal.fire('Atención', 'No hay administradores disponibles. Todos están asignados a un transporte.', 'warning');
-    }
-
     const { value: newAdminId } = await Swal.fire({
-        title: 'Cambiar Chofer',
+        title: 'Asignar / Cambiar Chofer',
         html: `
             <select id="swal-new-admin" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; outline: none;">
-                <option value="">Seleccione un nuevo chofer...</option>
+                <option value="">Seleccione una opción...</option>
                 ${optionsHtml}
             </select>
         `,
@@ -951,22 +958,25 @@ async function cambiarChofer(transporteId, oldAdminId, viajeId) {
         confirmButtonText: 'Guardar',
         preConfirm: () => {
             const val = document.getElementById('swal-new-admin').value;
-            if(!val) Swal.showValidationMessage('Debe seleccionar un chofer');
+            if(!val && tipo === 'bus_50') {
+                Swal.showValidationMessage('Para un autobús debe seleccionar un chofer');
+            }
             return val;
         }
     });
 
-    if (newAdminId) {
+    if (newAdminId !== undefined && newAdminId !== null) {
         try {
+            const finalAdminId = (newAdminId === '__none__' || newAdminId === '') ? null : newAdminId;
             Swal.fire({ title: 'Actualizando...', didOpen: () => Swal.showLoading() });
-            await window.db.from('transportes').update({ admin_id: newAdminId }).eq('id', transporteId);
-            
-            if (oldAdminId && oldAdminId !== 'null' && oldAdminId !== 'undefined') {
+            await window.db.from('transportes').update({ admin_id: finalAdminId }).eq('id', transporteId);
+            if(oldAdminId && oldAdminId !== 'null' && oldAdminId !== 'undefined') {
                 await window.db.from('usuarios').update({ transporte_id: null, viaje_id: null, asiento: null }).eq('id', oldAdminId);
             }
-            await window.db.from('usuarios').update({ transporte_id: transporteId, viaje_id: viajeId }).eq('id', newAdminId);
-            
-            Swal.fire('¡Cambiado!', 'Se ha asignado el nuevo chofer.', 'success');
+            if(finalAdminId) {
+                await window.db.from('usuarios').update({ transporte_id: transporteId, viaje_id: viajeId }).eq('id', finalAdminId);
+            }
+            Swal.fire('¡Actualizado!', 'Se ha actualizado la asignación del transporte.', 'success');
             cargarTransportesModal(viajeId);
         } catch(e) {
             Swal.fire('Error', 'Fallo al cambiar el chofer.', 'error');
@@ -1486,33 +1496,286 @@ async function cargarSolicitudesSuper() {
         badge.innerText = pendientes;
     }
     if (contador) contador.innerText = 'Pendientes: ' + pendientes;
-    if (!filas.length) {
-        tbody.innerHTML = '<tr><td colspan="6">No hay solicitudes.</td></tr>';
-        return;
-    }
+    window.solicitudesCache = filas;
     const userIds = [...new Set(filas.map((s) => s.usuario_id).filter(Boolean))];
     const viajeIds = [...new Set(filas.map((s) => s.viaje_id).filter(Boolean))];
     const personasP = userIds.length ? window.db.from('usuarios').select('id, nombre_completo').in('id', userIds) : Promise.resolve({ data: [] });
-    const viajesP = viajeIds.length ? window.db.from('viajes').select('id, titulo').in('id', viajeIds) : Promise.resolve({ data: [] });
+    const viajesP = viajeIds.length ? window.db.from('viajes').select('id, titulo, ruta').in('id', viajeIds) : Promise.resolve({ data: [] });
     const [{ data: personas }, { data: viajes }] = await Promise.all([personasP, viajesP]);
+    window.solicitudesViajes = viajes || [];
     const nombres = {};
     (personas || []).forEach((u) => { nombres[u.id] = u.nombre_completo; });
     const titulos = {};
     (viajes || []).forEach((v) => { titulos[v.id] = v.titulo; });
-    tbody.innerHTML = filas.map((p) => {
+    if (!filas.length) tbody.innerHTML = '<tr><td colspan="6">No hay solicitudes.</td></tr>';
+    else tbody.innerHTML = filas.map((p) => {
         const info = clasificarSolicitud(p);
-        const acciones = info.estado === 'pendiente'
-            ? `<button type="button" class="btn btn-success btn-auto" onclick="superResolverParada('${p.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="superResolverParada('${p.id}', 'rechazada')">Rechazar</button>`
-            : escaparHtml(info.estado);
+        const latN = Number(p.lat);
+        const lngN = Number(p.lng);
+        const coord = isFinite(latN) && isFinite(lngN) ? latN.toFixed(5) + ', ' + lngN.toFixed(5) : 'Sin coordenadas';
+        const badgeColor = info.estado === 'pendiente' ? 'pending' : (info.estado === 'aprobada' ? 'approved' : '');
+        const acciones = `<button type="button" class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudSuper('${p.id}')" style="display:inline-flex; align-items:center; gap:4px;">
+            🔍 ${info.estado === 'pendiente' ? 'Revisar en Mapa' : 'Ver en Mapa'}
+        </button>`;
         return `<tr>
             <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
             <td>${escaparHtml(titulos[p.viaje_id] || 'Viaje')}</td>
-            <td>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</td>
-            <td>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</td>
-            <td>${escaparHtml(info.estado)}</td>
+            <td>${info.tipo === 'abordaje' ? 'Subida (Abordaje)' : 'Durante el viaje'}</td>
+            <td><b>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</b><br><span class="text-muted" style="font-size:0.8rem;">${coord}</span></td>
+            <td><span class="badge ${badgeColor}">${escaparHtml(info.estado)}</span></td>
             <td>${acciones}</td>
         </tr>`;
     }).join('');
+    if (document.getElementById('paradas') && document.getElementById('paradas').classList.contains('active')) {
+        pintarMapaSolicitudes(window.solicitudEnfocada || null);
+        window.solicitudEnfocada = null;
+    }
+}
+
+let paradasMap = null;
+let paradasCapas = [];
+
+function asegurarMapaParadas() {
+    const caja = document.getElementById('paradas-map');
+    if (!caja) return null;
+    if (!paradasMap) {
+        paradasMap = L.map('paradas-map').setView([13.6929, -89.2182], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(paradasMap);
+    }
+    setTimeout(() => paradasMap.invalidateSize(), 80);
+    setTimeout(() => paradasMap.invalidateSize(), 400);
+    return paradasMap;
+}
+
+function pintarMapaSolicitudes(enfocarId) {
+    const mapa = asegurarMapaParadas();
+    if (!mapa) return;
+    paradasCapas.forEach((capa) => mapa.removeLayer(capa));
+    paradasCapas = [];
+    const filas = window.solicitudesCache || [];
+    const viajes = window.solicitudesViajes || [];
+    const visibles = enfocarId ? filas.filter((s) => s.id === enfocarId) : filas.filter((s) => clasificarSolicitud(s).estado === 'pendiente');
+    const viajesDibujados = {};
+    const limites = [];
+    visibles.forEach((s) => {
+        if (!viajesDibujados[s.viaje_id]) {
+            viajesDibujados[s.viaje_id] = true;
+            const viaje = viajes.find((v) => v.id === s.viaje_id);
+            const ruta = puntosDeRuta(viaje && viaje.ruta);
+            if (ruta.length > 1) {
+                const linea = L.polyline(ruta.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapa);
+                paradasCapas.push(linea);
+                ruta.forEach((r) => limites.push([r.lat, r.lng]));
+            }
+        }
+        const latN = Number(s.lat);
+        const lngN = Number(s.lng);
+        if (!isFinite(latN) || !isFinite(lngN)) return;
+        const info = clasificarSolicitud(s);
+        const marca = L.circleMarker([latN, lngN], { radius: enfocarId ? 11 : 8, color: '#8e2f2f', fillColor: '#c45c4a', fillOpacity: 1, weight: 2 }).addTo(mapa);
+        marca.bindPopup('<b>' + escaparHtml(info.nombre || 'Punto solicitado') + '</b><br>' + (info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'));
+        paradasCapas.push(marca);
+        limites.push([latN, lngN]);
+        if (enfocarId) marca.openPopup();
+    });
+    if (limites.length) mapa.fitBounds(limites, { padding: [28, 28], maxZoom: 16 });
+    setTimeout(() => mapa.invalidateSize(), 200);
+}
+
+function verPuntoSolicitud(id) {
+    window.solicitudEnfocada = id;
+    const tab = document.getElementById('paradas');
+    const item = document.querySelector('.menu-item[data-target="paradas"]');
+    if (tab && !tab.classList.contains('active') && item) item.click();
+    else pintarMapaSolicitudes(id);
+    const caja = document.getElementById('paradas-map');
+    if (caja) caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function evaluarSolicitudSuper(id) {
+    const p = (window.solicitudesCache || []).find((s) => s.id === id) || 
+              (await window.db.from('paradas_intermitentes').select('*').eq('id', id).single()).data;
+    if (!p) return Swal.fire('Error', 'No se encontró la solicitud.', 'error');
+
+    const info = clasificarSolicitud(p);
+    
+    // Obtener datos del estudiante y del viaje
+    const { data: usuario } = await window.db.from('usuarios').select('id, nombre_completo, codigo_pasajero, foto_perfil, telefono').eq('id', p.usuario_id).maybeSingle();
+    const { data: viaje } = await window.db.from('viajes').select('id, titulo, ruta, fecha_salida').eq('id', p.viaje_id).maybeSingle();
+    
+    const nombreEstudiante = usuario ? usuario.nombre_completo : 'Estudiante';
+    const codigoEstudiante = (usuario && usuario.codigo_pasajero) ? `Código: ${usuario.codigo_pasajero}` : '';
+    const tituloViaje = viaje ? viaje.titulo : 'Viaje';
+    const rutaPuntos = puntosDeRuta(viaje && viaje.ruta);
+    const latP = Number(p.lat);
+    const lngP = Number(p.lng);
+    const tieneCoords = isFinite(latP) && isFinite(lngP);
+    
+    // Distancia al recorrido
+    let textoDistancia = '';
+    if (tieneCoords && rutaPuntos.length >= 2) {
+        const proy = puntoSobreRuta(latP, lngP, rutaPuntos, 5000);
+        if (proy) {
+            const d = Math.round(proy.dist);
+            const dentroMargen = d <= MARGEN_RUTA_METROS;
+            textoDistancia = dentroMargen
+                ? `<span style="color:#16a34a; font-weight:600; font-size:0.85rem;">✓ A ${d} metros del trazado (Dentro del margen de 50 m)</span>`
+                : `<span style="color:#dc2626; font-weight:600; font-size:0.85rem;">⚠️ A ${d} metros del trazado (Supera el margen recomendado de 50 m)</span>`;
+        }
+    }
+    
+    const fotoSrc = (usuario && usuario.foto_perfil) ? usuario.foto_perfil : `https://ui-avatars.com/api/?name=${encodeURIComponent(nombreEstudiante)}&background=random`;
+    const tipoTexto = info.tipo === 'abordaje' ? 'Punto de Subida (Abordaje)' : 'Parada solicitada durante el viaje';
+    const isPendiente = info.estado === 'pendiente';
+    
+    await Swal.fire({
+        title: `Solicitud de Parada: ${escaparHtml(info.nombre || 'Punto')}`,
+        html: `
+            <div style="text-align:left; font-size:0.92rem; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
+                    <img src="${fotoSrc}" style="width:42px; height:42px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
+                    <div style="flex:1;">
+                        <strong style="color:var(--navy); font-size:1rem; display:block;">${escaparHtml(nombreEstudiante)}</strong>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">${codigoEstudiante} &nbsp;|&nbsp; <b>Viaje:</b> ${escaparHtml(tituloViaje)}</span>
+                    </div>
+                    <span class="badge ${isPendiente ? 'pending' : (info.estado === 'aprobada' ? 'approved' : '')}" style="font-size:0.85rem;">
+                        ${escaparHtml(info.estado.toUpperCase())}
+                    </span>
+                </div>
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                    <div>
+                        <span style="font-weight:600; color:var(--navy);">Lugar:</span> ${escaparHtml(info.nombre || 'Sin nombre')} (${tipoTexto})
+                    </div>
+                    <div>${textoDistancia}</div>
+                </div>
+            </div>
+
+            <!-- Contenedor del mapa de evaluación -->
+            <div id="modal-evaluar-map" style="width:100%; height:370px; border-radius:8px; border:2px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05);"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:#64748b; margin-top:6px;">
+                <span>🟢 Salida &nbsp;|&nbsp; 🔴 Destino &nbsp;|&nbsp; 📍 Punto Solicitado &nbsp;|&nbsp; ━━ Ruta</span>
+                <span>${tieneCoords ? (latP.toFixed(5) + ', ' + lngP.toFixed(5)) : 'Sin coordenadas'}</span>
+            </div>
+        `,
+        width: 780,
+        showCancelButton: true,
+        showDenyButton: isPendiente,
+        confirmButtonText: isPendiente ? '✓ Aprobar Parada' : 'Aceptar',
+        confirmButtonColor: '#16a34a',
+        denyButtonText: '✕ Rechazar Parada',
+        denyButtonColor: '#dc2626',
+        cancelButtonText: isPendiente ? 'Dejar Pendiente' : 'Cerrar',
+        cancelButtonColor: '#64748b',
+        didOpen: () => {
+            if (!tieneCoords) return;
+            const mapEl = document.getElementById('modal-evaluar-map');
+            if (!mapEl) return;
+            
+            const mapaModal = L.map('modal-evaluar-map').setView([latP, lngP], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(mapaModal);
+
+            const limites = [[latP, lngP]];
+
+            // 1. Dibujar la ruta planeada del viaje
+            if (rutaPuntos.length >= 2) {
+                const latlngsRuta = rutaPuntos.map(r => [r.lat, r.lng]);
+                const polyline = L.polyline(latlngsRuta, { color: '#0e4c81', weight: 5, opacity: 0.85 }).addTo(mapaModal);
+                latlngsRuta.forEach(ll => limites.push(ll));
+
+                // Marcador de salida (Verde)
+                const origen = rutaPuntos[0];
+                const iconOrigen = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background:#16a34a; width:16px; height:16px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 6px rgba(0,0,0,0.4);" title="Salida: ${origen.nombre || ''}"></div>`,
+                    iconSize: [16, 16]
+                });
+                L.marker([origen.lat, origen.lng], { icon: iconOrigen }).addTo(mapaModal).bindPopup(`<b>Punto de Salida</b><br>${origen.nombre || ''}`);
+
+                // Marcador de destino (Rojo)
+                const destino = rutaPuntos[rutaPuntos.length - 1];
+                const iconDestino = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background:#b91c1c; width:16px; height:16px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 6px rgba(0,0,0,0.4);" title="Destino: ${destino.nombre || ''}"></div>`,
+                    iconSize: [16, 16]
+                });
+                L.marker([destino.lat, destino.lng], { icon: iconDestino }).addTo(mapaModal).bindPopup(`<b>Destino Final</b><br>${destino.nombre || ''}`);
+
+                // Paradas intermedias oficiales
+                for (let i = 1; i < rutaPuntos.length - 1; i++) {
+                    const pi = rutaPuntos[i];
+                    L.circleMarker([pi.lat, pi.lng], { radius: 6, color: '#0e4c81', fillColor: '#38bdf8', fillOpacity: 0.9, weight: 2 })
+                        .addTo(mapaModal).bindPopup(`<b>Parada oficial ${i+1}:</b> ${pi.nombre || ''}`);
+                }
+
+                // Trazar con OSRM para seguir las calles reales
+                try {
+                    const waypointsOSRM = rutaPuntos.map(r => L.latLng(r.lat, r.lng));
+                    const routing = L.Routing.control({
+                        waypoints: waypointsOSRM,
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        show: false,
+                        createMarker: () => null,
+                        lineOptions: { styles: [{ color: '#2563eb', weight: 6, opacity: 0.9 }] },
+                        router: L.Routing.osrmv1({ serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1' })
+                    }).addTo(mapaModal);
+
+                    routing.on('routesfound', (e) => {
+                        const coords = e.routes && e.routes[0] && e.routes[0].coordinates;
+                        if (coords) mapaModal.removeLayer(polyline);
+                    });
+                } catch(e) { }
+            }
+
+            // 2. Marcador destacado del punto solicitado por el estudiante
+            const iconPunto = L.divIcon({
+                className: 'custom-div-icon',
+                html: `
+                    <div style="position:relative; width:32px; height:32px; display:flex; align-items:center; justify-content:center;">
+                        <div style="position:absolute; width:30px; height:30px; border-radius:50%; background:rgba(239,68,68,0.35); animation:pulse-gps 1.5s infinite;"></div>
+                        <div style="position:relative; background:#ef4444; width:24px; height:24px; border-radius:50%; border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:bold;">📍</div>
+                    </div>
+                `,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+
+            const markerPunto = L.marker([latP, lngP], { icon: iconPunto }).addTo(mapaModal);
+            markerPunto.bindPopup(`
+                <div style="font-size:0.9rem;">
+                    <b style="color:#b91c1c;">📍 Punto Solicitado</b><br>
+                    <b>Lugar:</b> ${escaparHtml(info.nombre || 'Sin nombre')}<br>
+                    <b>Estudiante:</b> ${escaparHtml(nombreEstudiante)}<br>
+                    <b>Tipo:</b> ${tipoTexto}
+                </div>
+            `).openPopup();
+
+            if (limites.length > 1) {
+                mapaModal.fitBounds(L.latLngBounds(limites).pad(0.18), { maxZoom: 16 });
+            } else {
+                mapaModal.setView([latP, lngP], 16);
+            }
+
+            setTimeout(() => mapaModal.invalidateSize(), 200);
+            setTimeout(() => mapaModal.invalidateSize(), 500);
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed && isPendiente) {
+            await resolverSolicitudGuardada(p, 'aprobada');
+            Swal.fire({ icon: 'success', title: 'Parada Aprobada', text: `Se ha confirmado la parada "${info.nombre || ''}" para ${nombreEstudiante}.`, timer: 2000, showConfirmButton: false });
+            cargarSolicitudesSuper();
+            if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+        } else if (result.isDenied && isPendiente) {
+            await resolverSolicitudGuardada(p, 'rechazada');
+            Swal.fire({ icon: 'info', title: 'Parada Rechazada', text: `La solicitud fue rechazada.`, timer: 2000, showConfirmButton: false });
+            cargarSolicitudesSuper();
+            if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+        }
+    });
 }
 
 async function superResolverParada(id, decision) {
@@ -1731,7 +1994,8 @@ function asegurarMapaOperacion() {
         opMap = L.map('op-map').setView([13.6929, -89.2182], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(opMap);
     }
-    setTimeout(() => opMap.invalidateSize(), 200);
+    setTimeout(() => opMap.invalidateSize(), 80);
+    setTimeout(() => opMap.invalidateSize(), 450);
 }
 
 async function cargarOperacion() {
@@ -1787,11 +2051,46 @@ function pintarEstadoOperacion(estado) {
 
 function dibujarRutaOperacion() {
     if (!opMap) return;
-    if (window.opRuta) opMap.removeLayer(window.opRuta);
+    if (window.opGrupo) opMap.removeLayer(window.opGrupo);
+    window.opGrupo = L.layerGroup().addTo(opMap);
     const puntos = window.rutaOperacion || [];
-    if (puntos.length < 2) return;
-    window.opRuta = L.polyline(puntos.map((p) => [p.lat, p.lng]), { color: '#0e4c81', weight: 4 }).addTo(opMap);
-    opMap.fitBounds(window.opRuta.getBounds(), { padding: [20, 20] });
+    if (puntos.length > 1) {
+        const linea = L.polyline(puntos.map((p) => [p.lat, p.lng]), { color: '#0e4c81', weight: 4 }).addTo(window.opGrupo);
+        puntos.forEach((p, i) => {
+            L.circleMarker([p.lat, p.lng], { radius: 5, color: '#0c2340', fillColor: '#ffffff', fillOpacity: 1, weight: 2 })
+                .addTo(window.opGrupo)
+                .bindPopup('<b>' + escaparHtml(p.nombre || ('Parada ' + (i + 1))) + '</b>');
+        });
+        opMap.fitBounds(linea.getBounds(), { padding: [24, 24] });
+    }
+    setTimeout(() => opMap.invalidateSize(), 80);
+    setTimeout(() => opMap.invalidateSize(), 450);
+}
+
+function marcarSolicitudesOperacion(filas) {
+    if (!opMap) return;
+    if (window.opSolicitudes) opMap.removeLayer(window.opSolicitudes);
+    window.opSolicitudes = L.layerGroup().addTo(opMap);
+    (filas || []).forEach((s) => {
+        const latN = Number(s.lat);
+        const lngN = Number(s.lng);
+        if (!isFinite(latN) || !isFinite(lngN)) return;
+        const info = clasificarSolicitud(s);
+        L.circleMarker([latN, lngN], { radius: 9, color: '#8e2f2f', fillColor: '#c45c4a', fillOpacity: 1, weight: 2 })
+            .addTo(window.opSolicitudes)
+            .bindPopup('<b>' + escaparHtml(info.nombre || 'Punto solicitado') + '</b><br>' + (info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'));
+    });
+}
+
+function verPuntoOperacion(id) {
+    const s = (window.paradasOperacion || []).find((x) => x.id === id);
+    const latN = s ? Number(s.lat) : NaN;
+    const lngN = s ? Number(s.lng) : NaN;
+    if (!opMap || !isFinite(latN) || !isFinite(lngN)) return;
+    opMap.setView([latN, lngN], 16);
+    const caja = document.getElementById('op-map');
+    if (caja) caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => opMap.invalidateSize(), 300);
 }
 
 async function cargarOperacionUnidad() {
@@ -1837,6 +2136,8 @@ async function cargarParadasOperacion() {
     }
     const { data: sols } = await window.db.from('paradas_intermitentes').select('*').eq('viaje_id', viajeId);
     const filas = sols || [];
+    window.paradasOperacion = filas;
+    marcarSolicitudesOperacion(filas);
     if (!filas.length) {
         tbody.innerHTML = '<tr><td colspan="5">Sin solicitudes.</td></tr>';
         return;
@@ -1847,9 +2148,7 @@ async function cargarParadasOperacion() {
     (personas || []).forEach((u) => { nombres[u.id] = u.nombre_completo; });
     tbody.innerHTML = filas.map((p) => {
         const info = clasificarSolicitud(p);
-        const acciones = info.estado === 'pendiente'
-            ? `<button type="button" class="btn btn-success btn-auto" onclick="operacionResolverParada('${p.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="operacionResolverParada('${p.id}', 'rechazada')">Rechazar</button>`
-            : escaparHtml(info.estado);
+        const acciones = `<button type="button" class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudSuper('${p.id}')">🔍 Revisar en Mapa</button>`;
         return `<tr><td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td><td>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</td><td>${escaparHtml(info.nombre || 'Punto')}</td><td>${escaparHtml(info.estado)}</td><td>${acciones}</td></tr>`;
     }).join('');
 }

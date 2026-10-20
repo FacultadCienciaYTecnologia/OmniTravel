@@ -391,7 +391,8 @@
                         <h3 class="mb-2">Solicitudes de parada</h3>
                         <span class="badge" id="super-paradas-count" style="background:var(--warning); color:#fff;">Pendientes: 0</span>
                     </div>
-                    <p class="text-muted mb-3">Llegan aquí las mismas solicitudes que ve el chofer: parada de subida y punto durante el viaje. El superadministrador puede aprobarlas o rechazarlas en cualquier viaje.</p>
+                    <p class="text-muted mb-3">Llegan aquí las mismas solicitudes que ve el chofer. El mapa muestra el recorrido y el punto exacto que marcó el estudiante. Use «Ver punto» para centrarlo.</p>
+                    <div id="paradas-map" class="mb-3"></div>
                     <div class="table-responsive">
                         <table>
                             <thead>
@@ -446,9 +447,9 @@
                                 <input type="file" id="t-file-img" accept="image/*" style="width:100%; padding:8px; border: 1px solid var(--card-border); border-radius: var(--radius-sm); background: #fff;">
                             </div>
                             <div>
-                                <label>Chofer Asignado (Admin)</label>
-                                <select id="t-admin-select" style="width:100%; padding:8px;" required>
-                                    <option value="">Seleccione un administrador...</option>
+                                <label id="lbl-t-admin">Chofer Asignado (Admin) <span id="badge-admin-req" style="color:var(--error); font-size:0.8rem; font-weight:normal;">*Requerido para Autobús</span></label>
+                                <select id="t-admin-select" style="width:100%; padding:8px;">
+                                    <option value="">Seleccione un administrador (o dejar vacío)...</option>
                                 </select>
                             </div>
                             <div style="grid-column: 1 / -1;">

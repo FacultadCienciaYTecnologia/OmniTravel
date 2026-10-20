@@ -214,15 +214,28 @@ async function loadAdminDashboard() {
                     const nombre = u ? u.nombre_completo : 'Un estudiante';
                     const tipoTxt = info.tipo === 'abordaje' ? 'subirse' : 'una parada durante el recorrido';
                     const lugar = info.nombre ? ' en ' + info.nombre : '';
+                    const latA = Number(p.lat);
+                    const lngA = Number(p.lng);
                     Swal.fire({
                         title: 'Solicitud de parada',
-                        text: nombre + ' solicitó ' + tipoTxt + lugar + '.',
-                        icon: 'info',
+                        html: '<p style="margin:0 1.2rem 0.6rem;">' + escaparHtml(nombre) + ' solicitó ' + escaparHtml(tipoTxt) + escaparHtml(lugar) + '.</p><div id="swal-parada-admin" style="height:280px;margin:0 1rem;border:1px solid #cfd6de;"></div>',
+                        width: 680,
                         showDenyButton: true,
                         showCancelButton: true,
                         confirmButtonText: 'Aprobar',
                         denyButtonText: 'Rechazar',
-                        cancelButtonText: 'Dejar pendiente'
+                        cancelButtonText: 'Dejar pendiente',
+                        didOpen: () => {
+                            if (!isFinite(latA) || !isFinite(lngA)) return;
+                            const mapaAviso = L.map('swal-parada-admin').setView([latA, lngA], 16);
+                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapaAviso);
+                            if (window.rutaActual && window.rutaActual.length > 1) {
+                                const trazo = L.polyline(window.rutaActual.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapaAviso);
+                                mapaAviso.fitBounds(trazo.getBounds().extend([latA, lngA]), { padding: [24, 24], maxZoom: 17 });
+                            }
+                            L.circleMarker([latA, lngA], { radius: 9, color: '#8e2f2f', fillColor: '#c45c4a', fillOpacity: 1, weight: 2 }).addTo(mapaAviso).bindPopup(escaparHtml(info.nombre || 'Punto solicitado')).openPopup();
+                            setTimeout(() => mapaAviso.invalidateSize(), 200);
+                        }
                     }).then(async (result) => {
                         if (result.isConfirmed) await resolverSolicitud(p, 'aprobada');
                         else if (result.isDenied) await resolverSolicitud(p, 'rechazada');
@@ -496,6 +509,8 @@ async function cargarSolicitudesParada() {
     if (!tbody || !viajeIdActual) return;
     if (panel) panel.style.display = 'block';
     const { data: sols } = await window.db.from('paradas_intermitentes').select('*').eq('viaje_id', viajeIdActual);
+    window.solicitudesAdmin = sols || [];
+    pintarMapaParadasAdmin(window.solicitudesAdmin);
     if (!sols || sols.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5">No hay solicitudes.</td></tr>';
         document.getElementById('count-paradas').innerText = 'Pendientes: 0';
@@ -511,9 +526,7 @@ async function cargarSolicitudesParada() {
     sols.forEach((p) => {
         const info = clasificarSolicitud(p);
         const tipo = info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje';
-        const acciones = info.estado === 'pendiente'
-            ? `<button class="btn btn-success btn-auto" onclick="resolverSolicitudPorId('${p.id}', 'aprobada')">Aprobar</button> <button class="btn btn-danger btn-auto" onclick="resolverSolicitudPorId('${p.id}', 'rechazada')">Rechazar</button>`
-            : escaparHtml(info.estado);
+        const acciones = `<button class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudAdmin('${p.id}')">🔍 ${info.estado === 'pendiente' ? 'Revisar en Mapa' : 'Ver en Mapa'}</button>`;
         tbody.innerHTML += `<tr>
             <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
             <td>${tipo}</td>
@@ -521,6 +534,139 @@ async function cargarSolicitudesParada() {
             <td>${escaparHtml(info.estado)}</td>
             <td>${acciones}</td>
         </tr>`;
+    });
+}
+
+let mapaParadasAdmin = null;
+function pintarMapaParadasAdmin(sols) {
+    const caja = document.getElementById('admin-paradas-map');
+    if (!caja) return;
+    if (!mapaParadasAdmin) {
+        mapaParadasAdmin = L.map('admin-paradas-map').setView([13.6929, -89.2182], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapaParadasAdmin);
+    }
+    if (window.capasParadasAdmin) window.capasParadasAdmin.forEach((c) => mapaParadasAdmin.removeLayer(c));
+    window.capasParadasAdmin = [];
+    const limites = [];
+    if (window.rutaActual && window.rutaActual.length > 1) {
+        const linea = L.polyline(window.rutaActual.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapaParadasAdmin);
+        window.capasParadasAdmin.push(linea);
+        window.rutaActual.forEach((r) => limites.push([r.lat, r.lng]));
+    }
+    (sols || []).forEach((s) => {
+        const latN = Number(s.lat);
+        const lngN = Number(s.lng);
+        if (!isFinite(latN) || !isFinite(lngN)) return;
+        const info = clasificarSolicitud(s);
+        const marca = L.circleMarker([latN, lngN], { radius: 8, color: '#8e2f2f', fillColor: '#c45c4a', fillOpacity: 1, weight: 2 }).addTo(mapaParadasAdmin);
+        marca.bindPopup('<b>' + escaparHtml(info.nombre || 'Punto solicitado') + '</b>');
+        window.capasParadasAdmin.push(marca);
+        limites.push([latN, lngN]);
+    });
+    if (limites.length) mapaParadasAdmin.fitBounds(limites, { padding: [24, 24], maxZoom: 16 });
+    setTimeout(() => mapaParadasAdmin.invalidateSize(), 200);
+}
+
+function verPuntoParadaAdmin(id) {
+    const s = (window.solicitudesAdmin || []).find((x) => x.id === id);
+    const latN = s ? Number(s.lat) : NaN;
+    const lngN = s ? Number(s.lng) : NaN;
+    if (!mapaParadasAdmin || !isFinite(latN) || !isFinite(lngN)) return;
+    mapaParadasAdmin.setView([latN, lngN], 16);
+    const caja = document.getElementById('admin-paradas-map');
+    if (caja) caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function evaluarSolicitudAdmin(id) {
+    const p = (window.solicitudesAdmin || []).find((s) => s.id === id) || 
+              (await window.db.from('paradas_intermitentes').select('*').eq('id', id).single()).data;
+    if (!p) return Swal.fire('Error', 'No se encontró la solicitud.', 'error');
+
+    const info = clasificarSolicitud(p);
+    const { data: usuario } = await window.db.from('usuarios').select('id, nombre_completo, codigo_pasajero, foto_perfil, telefono').eq('id', p.usuario_id).maybeSingle();
+    const nombre = usuario ? usuario.nombre_completo : 'Un estudiante';
+    const codigo = (usuario && usuario.codigo_pasajero) ? `Código: ${usuario.codigo_pasajero}` : '';
+    const fotoSrc = (usuario && usuario.foto_perfil) ? usuario.foto_perfil : `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=random`;
+    const tipoTxt = info.tipo === 'abordaje' ? 'Punto de Subida (Abordaje inicial)' : 'Parada solicitada durante el recorrido';
+    const latA = Number(p.lat);
+    const lngA = Number(p.lng);
+    const isPendiente = info.estado === 'pendiente';
+
+    let textoDistancia = '';
+    if (window.rutaActual && window.rutaActual.length >= 2 && isFinite(latA) && isFinite(lngA)) {
+        const proy = puntoSobreRuta(latA, lngA, window.rutaActual, 5000);
+        if (proy) {
+            const d = Math.round(proy.dist);
+            textoDistancia = d <= MARGEN_RUTA_METROS
+                ? `<span style="color:#16a34a; font-weight:600; font-size:0.85rem;">✓ A ${d} m del recorrido</span>`
+                : `<span style="color:#dc2626; font-weight:600; font-size:0.85rem;">⚠️ A ${d} m del recorrido (lejos)</span>`;
+        }
+    }
+
+    await Swal.fire({
+        title: `Solicitud: ${escaparHtml(info.nombre || 'Punto')}`,
+        html: `
+            <div style="text-align:left; font-size:0.92rem; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
+                    <img src="${fotoSrc}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">
+                    <div style="flex:1;">
+                        <strong style="color:var(--navy); font-size:1rem; display:block;">${escaparHtml(nombre)}</strong>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">${codigo}</span>
+                    </div>
+                    <span class="badge ${isPendiente ? 'pending' : 'approved'}">${escaparHtml(info.estado.toUpperCase())}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div><b>Lugar:</b> ${escaparHtml(info.nombre || 'Sin nombre')} (${tipoTxt})</div>
+                    <div>${textoDistancia}</div>
+                </div>
+            </div>
+            <div id="swal-admin-evaluar-map" style="height:320px; border-radius:8px; border:2px solid #cbd5e1;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:#64748b; margin-top:6px;">
+                <span>🟢 Salida &nbsp;|&nbsp; 📍 Punto Solicitado &nbsp;|&nbsp; ━━ Ruta</span>
+                <span>${isFinite(latA) ? (latA.toFixed(5) + ', ' + lngA.toFixed(5)) : ''}</span>
+            </div>
+        `,
+        width: 720,
+        showCancelButton: true,
+        showDenyButton: isPendiente,
+        confirmButtonText: isPendiente ? '✓ Aprobar Parada' : 'Aceptar',
+        confirmButtonColor: '#16a34a',
+        denyButtonText: '✕ Rechazar Parada',
+        denyButtonColor: '#dc2626',
+        cancelButtonText: isPendiente ? 'Dejar Pendiente' : 'Cerrar',
+        didOpen: () => {
+            if (!isFinite(latA) || !isFinite(lngA)) return;
+            const mapa = L.map('swal-admin-evaluar-map').setView([latA, lngA], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
+            
+            const limites = [[latA, lngA]];
+            if (window.rutaActual && window.rutaActual.length > 1) {
+                const latlngs = window.rutaActual.map(r => [r.lat, r.lng]);
+                L.polyline(latlngs, { color: '#0e4c81', weight: 5 }).addTo(mapa);
+                latlngs.forEach(ll => limites.push(ll));
+
+                const origen = window.rutaActual[0];
+                L.circleMarker([origen.lat, origen.lng], { radius: 8, color: '#16a34a', fillColor: '#22c55e', fillOpacity: 1 }).addTo(mapa).bindPopup("<b>Inicio</b>");
+            }
+
+            const iconPunto = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background:#ef4444; width:22px; height:22px; border-radius:50%; border:2px solid white; box-shadow:0 0 8px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; color:white; font-size:12px;">📍</div>`,
+                iconSize: [22, 22]
+            });
+            L.marker([latA, lngA], { icon: iconPunto }).addTo(mapa).bindPopup(`<b>Punto Solicitado</b><br>${escaparHtml(info.nombre || 'Parada')}`).openPopup();
+
+            if (limites.length > 1) mapa.fitBounds(L.latLngBounds(limites).pad(0.18), { maxZoom: 16 });
+            setTimeout(() => mapa.invalidateSize(), 200);
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed && isPendiente) {
+            await resolverSolicitud(p, 'aprobada');
+            cargarSolicitudesParada();
+        } else if (result.isDenied && isPendiente) {
+            await resolverSolicitud(p, 'rechazada');
+            cargarSolicitudesParada();
+        }
     });
 }
 
