@@ -92,8 +92,23 @@
                 <p class="text-muted mb-3">Inicie la ruta para indicar la salida y avance del viaje de la unidad.</p>
                 
                 <div style="background: #f8fafc; padding: 1rem 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--card-border); margin-bottom: 1rem;">
-                    <strong style="color:var(--navy); font-size:0.95rem;">Estado de la Unidad:</strong>
-                    <p id="unidad-estado-info" class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">Ruta programada lista para iniciar.</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h4 style="margin:0 0 4px; display:flex; align-items:center; font-size:0.95rem;">
+                                <span class="gps-status-indicator" id="gps-dot"></span>
+                                Transmisión GPS en Vivo
+                            </h4>
+                            <p id="gps-text" class="text-muted" style="margin:0; font-size:0.82rem;">Inactivo</p>
+                        </div>
+                        <label class="toggle-switch" title="Activar/desactivar transmisión GPS">
+                            <input type="checkbox" id="gps-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                        <strong style="color:var(--navy); font-size:0.9rem;">Estado de la Unidad:</strong>
+                        <p id="unidad-estado-info" class="text-muted" style="margin:2px 0 0; font-size:0.85rem;">Ruta programada lista para iniciar.</p>
+                    </div>
                 </div>
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">

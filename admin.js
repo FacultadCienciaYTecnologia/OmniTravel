@@ -62,58 +62,47 @@ async function loadAdminDashboard() {
         if(window.viajeEstadoActual === 'en_ruta_vuelta') label = 'Ruta de Vuelta en Progreso';
         document.getElementById('estado-ruta').innerText = label;
 
-        // Trazar ruta y punto de inicio (desplazamiento) en el mapa del Chofer
+        // Trazar ruta y punto de inicio (desplazamiento) en el mapa del Chofer con calles reales
         if (window.rutaActual && window.rutaActual.length > 0) {
             if (window.polylineRutaAdmin) {
-                if(window.polylineRutaAdmin.getWaypoints) map.removeControl(window.polylineRutaAdmin);
+                if (window.polylineRutaAdmin.getWaypoints) map.removeControl(window.polylineRutaAdmin);
                 else map.removeLayer(window.polylineRutaAdmin);
+                window.polylineRutaAdmin = null;
             }
-            if (window.origenMarker) { map.removeLayer(window.origenMarker); }
+            if (window.marcadoresRutaAdmin) {
+                window.marcadoresRutaAdmin.forEach(m => map.removeLayer(m));
+            }
+            window.marcadoresRutaAdmin = [];
 
-            const waypoints = window.rutaActual.map(r => L.latLng(r.lat, r.lng));
-            
-            window.polylineRutaAdmin = L.Routing.control({
-                waypoints: waypoints,
-                routeWhileDragging: false,
-                addWaypoints: false,
-                draggableWaypoints: false,
-                fitSelectedRoutes: true,
-                show: false, // Ocultar panel por defecto
-                router: L.Routing.osrmv1({
-                    serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1'
-                }),
-                createMarker: function(i, wp, nWps) {
-                    // Marcador de inicio verde
-                    if (i === 0) {
-                        const iconOrigen = L.divIcon({className: 'custom-div-icon', html: "<div style='background-color:#10b981; border-radius:50%; width:18px; height:18px; border:2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5);'></div>", iconSize: [18,18]});
-                        window.origenMarker = L.marker(wp.latLng, {icon: iconOrigen}).bindPopup("<b>Punto de Inicio</b><br>Debes estar a máximo 25 metros de aquí para iniciar.");
-                        return window.origenMarker;
+            const puntos = puntosDeRuta(window.rutaActual);
+            if (puntos.length > 1) {
+                window.polylineRutaAdmin = trazarRutaConCalles(map, puntos, {
+                    color: '#4338ca',
+                    weight: 5,
+                    opacity: 0.9,
+                    onRutaCalculada: (info) => {
+                        const summaryEl = document.getElementById('route-summary');
+                        if (summaryEl) {
+                            summaryEl.innerHTML = `⏱️ Tiempo est.: <b>${info.duracionMin} min</b> &nbsp;|&nbsp; 📏 Distancia: <b>${info.distanciaKm} km</b> &nbsp;|&nbsp; <span style="color:#16a34a; font-weight:600;">🛣️ Calles reales activas</span>`;
+                        }
                     }
-                    const nombre = window.rutaActual[i]?.nombre || `Parada ${i+1}`;
-                    return L.marker(wp.latLng).bindPopup(`<b>${nombre}</b>`);
-                }
-            }).addTo(map);
+                });
 
-            window.polylineRutaAdmin.on('routesfound', function(e) {
-                const routes = e.routes;
-                const summary = routes[0].summary;
-                const distKm = (summary.totalDistance / 1000).toFixed(1);
-                const timeMin = Math.round(summary.totalTime / 60);
-                const summaryEl = document.getElementById('route-summary');
-                if(summaryEl) summaryEl.innerHTML = `⏱️ Tiempo est.: ${timeMin} min &nbsp;|&nbsp; 📏 Distancia: ${distKm} km`;
-            });
-
-            window.polylineRutaAdmin.on('routingerror', function(e) {
-                console.warn('OSRM rate limit. Dibujando línea recta.');
-                map.removeControl(window.polylineRutaAdmin);
-                const latlngs = window.rutaActual.map(r => [r.lat, r.lng]);
-                window.polylineRutaAdmin = L.polyline(latlngs, {color: '#4338ca', weight: 5}).addTo(map);
-                map.fitBounds(window.polylineRutaAdmin.getBounds());
-                
-                const origen = window.rutaActual[0];
-                const iconOrigen = L.divIcon({className: 'custom-div-icon', html: "<div style='background-color:#10b981; border-radius:50%; width:18px; height:18px; border:2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5);'></div>", iconSize: [18,18]});
-                window.origenMarker = L.marker([origen.lat, origen.lng], {icon: iconOrigen}).addTo(map).bindPopup("<b>Punto de Inicio</b><br>Debes estar a máximo 25 metros de aquí para iniciar.");
-            });
+                puntos.forEach((p, i) => {
+                    const esOrigen = i === 0;
+                    const esDestino = i === puntos.length - 1;
+                    const cColor = esOrigen ? '#10b981' : (esDestino ? '#ef4444' : '#6366f1');
+                    const titulo = esOrigen ? 'Punto de Inicio' : (esDestino ? 'Destino Final' : (p.nombre || `Parada ${i + 1}`));
+                    const m = L.circleMarker([p.lat, p.lng], {
+                        radius: (esOrigen || esDestino) ? 8.5 : 6,
+                        color: '#1e1b4b',
+                        fillColor: cColor,
+                        fillOpacity: 1,
+                        weight: 2
+                    }).addTo(map).bindPopup(`<b>${escaparHtml(titulo)}</b>${esOrigen ? '<br><small>Debes estar a máximo 25 metros de aquí para iniciar.</small>' : ''}`);
+                    window.marcadoresRutaAdmin.push(m);
+                });
+            }
         }
 
         // Obtener datos actualizados del admin para saber su transporte asignado
@@ -250,8 +239,8 @@ async function loadAdminDashboard() {
                             const mapaAviso = L.map('swal-parada-admin').setView([latA, lngA], 16);
                             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapaAviso);
                             if (window.rutaActual && window.rutaActual.length > 1) {
-                                const trazo = L.polyline(window.rutaActual.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapaAviso);
-                                mapaAviso.fitBounds(trazo.getBounds().extend([latA, lngA]), { padding: [24, 24], maxZoom: 17 });
+                                const trazo = trazarRutaConCalles(mapaAviso, window.rutaActual, { color: '#0e4c81', weight: 4 });
+                                if (trazo) mapaAviso.fitBounds(trazo.getBounds().extend([latA, lngA]), { padding: [24, 24], maxZoom: 17 });
                             }
                             L.circleMarker([latA, lngA], { radius: 9, color: '#8e2f2f', fillColor: '#c45c4a', fillOpacity: 1, weight: 2 }).addTo(mapaAviso).bindPopup(escaparHtml(info.nombre || 'Punto solicitado')).openPopup();
                             setTimeout(() => mapaAviso.invalidateSize(), 200);
@@ -394,7 +383,89 @@ async function marcarAbordo(btn, id, estaAbordo) {
     await window.db.from('usuarios').update({ abordo: nuevoEstado, asistencia_cancelada: false }).eq('id', id);
 }
 
-// ====== LÓGICA DE VIAJE (SIN GPS) ======
+// ====== LÓGICA DE VIAJE Y TRANSMISIÓN GPS ======
+let watchId = null;
+let markerUbicacionChofer = null;
+let noSleepInstance = null;
+try { if (typeof NoSleep !== 'undefined') noSleepInstance = new NoSleep(); } catch(e) {}
+
+const gpsToggle = document.getElementById('gps-toggle');
+const gpsDot = document.getElementById('gps-dot');
+const gpsText = document.getElementById('gps-text');
+
+if (gpsToggle) {
+    gpsToggle.addEventListener('change', (e) => {
+        if (e.target.checked) activarGPS();
+        else desactivarGPS();
+    });
+}
+
+function activarGPS() {
+    if (!navigator.geolocation) {
+        if (gpsToggle) gpsToggle.checked = false;
+        return Swal.fire('Sin soporte GPS', 'Tu dispositivo no cuenta con soporte para geolocalización.', 'warning');
+    }
+    
+    if (gpsDot) gpsDot.classList.add('active');
+    if (gpsText) gpsText.innerText = 'Transmitiendo en vivo...';
+    try { if (noSleepInstance) noSleepInstance.enable(); } catch (e) { }
+    
+    watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const speed = position.coords.speed || 0;
+            
+            if (!markerUbicacionChofer) {
+                const busIcon = L.divIcon({
+                    className: 'custom-bus-icon',
+                    html: `<div style="background:#10b981; color:white; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(16,185,129,0.8); border:2px solid #fff; font-size:14px;">📍</div>`,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+                markerUbicacionChofer = L.marker([lat, lng], { icon: busIcon }).addTo(map).bindPopup('<b>Tu ubicación GPS actual</b>');
+            } else {
+                markerUbicacionChofer.setLatLng([lat, lng]);
+            }
+            
+            // Insertar lectura en Supabase para visibilidad del superadmin y pasajeros
+            if (transporteIdActual) {
+                try {
+                    await window.db.from('gps_logs').insert([{
+                        transporte_id: transporteIdActual,
+                        latitud: lat,
+                        longitud: lng,
+                        velocidad: speed
+                    }]);
+                } catch(err) {
+                    console.warn('Registro de GPS en BD omitido:', err);
+                }
+            }
+        },
+        (error) => {
+            console.warn('Error obteniendo geolocalización:', error);
+            if (gpsText) gpsText.innerText = 'Sin señal o permiso denegado';
+            desactivarGPS();
+            if (gpsToggle) gpsToggle.checked = false;
+        },
+        { enableHighAccuracy: true, maximumAge: 8000, timeout: 10000 }
+    );
+}
+
+function desactivarGPS() {
+    if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+    if (gpsDot) gpsDot.classList.remove('active');
+    if (gpsText) gpsText.innerText = 'Inactivo';
+    try { if (noSleepInstance) noSleepInstance.disable(); } catch (e) { }
+    if (markerUbicacionChofer) {
+        map.removeLayer(markerUbicacionChofer);
+        markerUbicacionChofer = null;
+    }
+}
+
 async function iniciarRuta() {
     if(!viajeIdActual) return;
     if(!window.rutaActual || window.rutaActual.length === 0) {
@@ -419,6 +490,10 @@ async function iniciarRuta() {
         document.getElementById('estado-ruta').innerText = 'Ruta de Ida en Progreso';
         const infoUni = document.getElementById('unidad-estado-info');
         if (infoUni) infoUni.innerText = 'En trayecto hacia el destino.';
+        
+        // Si el chofer tiene el toggle activo, inicia transmisión GPS
+        if (gpsToggle && gpsToggle.checked && !watchId) activarGPS();
+
         Swal.fire('Ruta Iniciada', 'La ruta de ida ha quedado iniciada.', 'success');
         setTimeout(() => loadAdminDashboard(), 1000);
     } catch(e) { console.error(e); Swal.fire('Error', 'Fallo al iniciar ruta.', 'error'); }
@@ -438,6 +513,7 @@ async function iniciarRetorno() {
 
     try {
         await window.db.from('viajes').update({ estado: 'en_ruta_vuelta' }).eq('id', viajeIdActual);
+        if (gpsToggle && gpsToggle.checked && !watchId) activarGPS();
         Swal.fire('Ruta de Retorno Iniciada', 'El viaje de regreso está en curso.', 'success');
         setTimeout(() => loadAdminDashboard(), 1000);
     } catch(e) { console.error(e); }
@@ -468,6 +544,8 @@ async function finalizarRuta() {
             });
             if(!res.isConfirmed) return;
             await window.db.from('viajes').update({ estado: 'finalizado', inscripcion_abierta: false }).eq('id', viajeIdActual);
+            desactivarGPS();
+            if (gpsToggle) gpsToggle.checked = false;
             Swal.fire('Viaje Concluido', 'El viaje ha finalizado con éxito.', 'success');
             setTimeout(() => loadAdminDashboard(), 1000);
         }
@@ -520,8 +598,8 @@ function pintarMapaParadasAdmin(sols) {
     window.capasParadasAdmin = [];
     const limites = [];
     if (window.rutaActual && window.rutaActual.length > 1) {
-        const linea = L.polyline(window.rutaActual.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapaParadasAdmin);
-        window.capasParadasAdmin.push(linea);
+        const linea = trazarRutaConCalles(mapaParadasAdmin, window.rutaActual, { color: '#0e4c81', weight: 4 });
+        if (linea) window.capasParadasAdmin.push(linea);
         window.rutaActual.forEach((r) => limites.push([r.lat, r.lng]));
     }
     (sols || []).forEach((s) => {
@@ -612,9 +690,8 @@ async function evaluarSolicitudAdmin(id) {
             
             const limites = [[latA, lngA]];
             if (window.rutaActual && window.rutaActual.length > 1) {
-                const latlngs = window.rutaActual.map(r => [r.lat, r.lng]);
-                L.polyline(latlngs, { color: '#0e4c81', weight: 5 }).addTo(mapa);
-                latlngs.forEach(ll => limites.push(ll));
+                const linea = trazarRutaConCalles(mapa, window.rutaActual, { color: '#0e4c81', weight: 5 });
+                window.rutaActual.forEach(ll => limites.push([ll.lat, ll.lng]));
 
                 const origen = window.rutaActual[0];
                 L.circleMarker([origen.lat, origen.lng], { radius: 8, color: '#16a34a', fillColor: '#22c55e', fillOpacity: 1 }).addTo(mapa).bindPopup("<b>Inicio</b>");

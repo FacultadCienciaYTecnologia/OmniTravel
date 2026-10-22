@@ -1665,8 +1665,8 @@ function pintarMapaSolicitudes(enfocarId) {
             const viaje = viajes.find((v) => v.id === s.viaje_id);
             const ruta = puntosDeRuta(viaje && viaje.ruta);
             if (ruta.length > 1) {
-                const linea = L.polyline(ruta.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(mapa);
-                paradasCapas.push(linea);
+                const linea = trazarRutaConCalles(mapa, ruta, { color: '#0e4c81', weight: 4.5, opacity: 0.85 });
+                if (linea) paradasCapas.push(linea);
                 ruta.forEach((r) => limites.push([r.lat, r.lng]));
             }
         }
@@ -1781,11 +1781,10 @@ async function evaluarSolicitudSuper(id) {
 
             const limites = [[latP, lngP]];
 
-            // 1. Dibujar la ruta planeada del viaje
+            // 1. Dibujar la ruta planeada del viaje siguiendo calles
             if (rutaPuntos.length >= 2) {
-                const latlngsRuta = rutaPuntos.map(r => [r.lat, r.lng]);
-                const polyline = L.polyline(latlngsRuta, { color: '#0e4c81', weight: 5, opacity: 0.85 }).addTo(mapaModal);
-                latlngsRuta.forEach(ll => limites.push(ll));
+                const polyline = trazarRutaConCalles(mapaModal, rutaPuntos, { color: '#0e4c81', weight: 5, opacity: 0.9 });
+                rutaPuntos.forEach(ll => limites.push([ll.lat, ll.lng]));
 
                 // Marcador de salida (Verde)
                 const origen = rutaPuntos[0];
@@ -1811,26 +1810,6 @@ async function evaluarSolicitudSuper(id) {
                     L.circleMarker([pi.lat, pi.lng], { radius: 6, color: '#0e4c81', fillColor: '#38bdf8', fillOpacity: 0.9, weight: 2 })
                         .addTo(mapaModal).bindPopup(`<b>Parada oficial ${i+1}:</b> ${pi.nombre || ''}`);
                 }
-
-                // Trazar con OSRM para seguir las calles reales
-                try {
-                    const waypointsOSRM = rutaPuntos.map(r => L.latLng(r.lat, r.lng));
-                    const routing = L.Routing.control({
-                        waypoints: waypointsOSRM,
-                        routeWhileDragging: false,
-                        addWaypoints: false,
-                        draggableWaypoints: false,
-                        show: false,
-                        createMarker: () => null,
-                        lineOptions: { styles: [{ color: '#2563eb', weight: 6, opacity: 0.9 }] },
-                        router: L.Routing.osrmv1({ serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1' })
-                    }).addTo(mapaModal);
-
-                    routing.on('routesfound', (e) => {
-                        const coords = e.routes && e.routes[0] && e.routes[0].coordinates;
-                        if (coords) mapaModal.removeLayer(polyline);
-                    });
-                } catch(e) { }
             }
 
             // 2. Marcador destacado del punto solicitado por el estudiante
@@ -1958,24 +1937,43 @@ async function verRutaActiva(viajeId, soloMarcadores) {
     if (window.rutaMonitoreo) {
         if (window.rutaMonitoreo.getWaypoints) globalMap.removeControl(window.rutaMonitoreo);
         else globalMap.removeLayer(window.rutaMonitoreo);
+        window.rutaMonitoreo = null;
     }
     if (window.marcadoresViaje) window.marcadoresViaje.forEach((m) => globalMap.removeLayer(m));
     window.marcadoresViaje = [];
 
     const puntos = puntosDeRuta(viaje.ruta);
     if (puntos.length > 1) {
-        window.rutaMonitoreo = L.polyline(puntos.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(globalMap);
-        globalMap.fitBounds(window.rutaMonitoreo.getBounds(), { padding: [30, 30] });
+        // Trazado de ruta siguiendo las calles reales con OSRM/GPS
+        window.rutaMonitoreo = trazarRutaConCalles(globalMap, puntos, {
+            color: '#0e4c81',
+            weight: 5,
+            opacity: 0.9,
+            onRutaCalculada: (info) => {
+                const infoBox = document.getElementById('gps-route-info');
+                const metrics = document.getElementById('gps-route-metrics');
+                if (infoBox && metrics) {
+                    metrics.innerText = `${info.distanciaKm} km · ~${info.duracionMin} min`;
+                    infoBox.style.display = 'flex';
+                }
+            }
+        });
 
         puntos.forEach((p, idx) => {
             const esExtremo = idx === 0 || idx === puntos.length - 1;
+            const esOrigen = idx === 0;
+            const esDestino = idx === puntos.length - 1;
+            const colorPunto = esOrigen ? '#10b981' : (esDestino ? '#ef4444' : '#3b82f6');
+            const tituloPunto = esOrigen ? '📍 Punto de Salida / Origen' : (esDestino ? '🏁 Destino Final' : `🚏 Parada Oficial ${idx + 1}`);
+            const horaStr = p.tiempo ? `<br><small style="color:#64748b;">Hora programada: ${escaparHtml(p.tiempo)}</small>` : '';
+
             const m = L.circleMarker([p.lat, p.lng], {
-                radius: esExtremo ? 8 : 6,
+                radius: esExtremo ? 9 : 6.5,
                 color: '#0c2340',
-                fillColor: idx === 0 ? '#10b981' : (idx === puntos.length - 1 ? '#ef4444' : '#3b82f6'),
+                fillColor: colorPunto,
                 fillOpacity: 1,
-                weight: 2
-            }).addTo(globalMap).bindPopup(`<b>${escaparHtml(p.nombre || (idx === 0 ? 'Origen' : (idx === puntos.length - 1 ? 'Destino' : 'Parada ' + (idx + 1))))}</b><br><span style="color:#0e4c81;font-weight:600;">Parada programada</span>`);
+                weight: 2.5
+            }).addTo(globalMap).bindPopup(`<b>${escaparHtml(p.nombre || (esOrigen ? 'Origen' : (esDestino ? 'Destino' : 'Parada ' + (idx + 1))))}</b><br><span style="color:${colorPunto};font-weight:600;">${tituloPunto}</span>${horaStr}`);
             window.marcadoresViaje.push(m);
         });
     }
@@ -1988,7 +1986,7 @@ async function verRutaActiva(viajeId, soloMarcadores) {
             if (!isFinite(latN) || !isFinite(lngN)) return;
             const info = clasificarSolicitud(s);
             const m = L.circleMarker([latN, lngN], {
-                radius: 7,
+                radius: 7.5,
                 color: '#854d0e',
                 fillColor: '#eab308',
                 fillOpacity: 1,
@@ -1996,6 +1994,38 @@ async function verRutaActiva(viajeId, soloMarcadores) {
             }).addTo(globalMap).bindPopup(`<b>${escaparHtml(info.nombre || 'Parada aprobada')}</b><br><span style="color:#854d0e;font-weight:600;">Solicitud de estudiante (Aprobada)</span><br><small>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</small>`);
             window.marcadoresViaje.push(m);
         });
+    }
+
+    // Ubicaciones GPS en tiempo real de unidades en ruta (si están transmitiendo)
+    try {
+        const { data: trans } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeId);
+        if (trans && trans.length) {
+            const transIds = trans.map(t => t.id);
+            const { data: logs } = await window.db.from('gps_logs').select('*').in('transporte_id', transIds).order('creado_en', { ascending: false }).limit(30);
+            if (logs && logs.length) {
+                const porTransporte = {};
+                logs.forEach(g => {
+                    if (!porTransporte[g.transporte_id] || esLecturaMasNueva(g, porTransporte[g.transporte_id])) {
+                        porTransporte[g.transporte_id] = g;
+                    }
+                });
+                trans.forEach(t => {
+                    const g = porTransporte[t.id];
+                    if (!g || !isFinite(Number(g.latitud)) || !isFinite(Number(g.longitud))) return;
+                    const busIcon = L.divIcon({
+                        className: 'custom-bus-icon',
+                        html: `<div style="background:#2563eb; color:white; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(37,99,235,0.7); border:2px solid #fff; font-size:16px;">🚌</div>`,
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16]
+                    });
+                    const markerBus = L.marker([Number(g.latitud), Number(g.longitud)], { icon: busIcon }).addTo(globalMap)
+                        .bindPopup(`<b>${etiquetaTransporte(t, trans)}</b><br><span style="color:#2563eb;font-weight:600;">📡 Posición GPS en vivo</span><br><small>Velocidad: ${Math.round(g.velocidad || 0)} km/h</small>`);
+                    window.marcadoresViaje.push(markerBus);
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Error leyendo GPS logs para el viaje:', e);
     }
 
     setTimeout(() => globalMap.invalidateSize(), 200);
@@ -2169,13 +2199,15 @@ function dibujarRutaOperacion() {
     window.opGrupo = L.layerGroup().addTo(opMap);
     const puntos = window.rutaOperacion || [];
     if (puntos.length > 1) {
-        const linea = L.polyline(puntos.map((p) => [p.lat, p.lng]), { color: '#0e4c81', weight: 4 }).addTo(window.opGrupo);
+        const linea = trazarRutaConCalles(opMap, puntos, { color: '#0e4c81', weight: 4.5, opacity: 0.9 });
+        if (linea) window.opGrupo.addLayer(linea);
         puntos.forEach((p, i) => {
-            L.circleMarker([p.lat, p.lng], { radius: 5, color: '#0c2340', fillColor: '#ffffff', fillOpacity: 1, weight: 2 })
+            const esExtremo = i === 0 || i === puntos.length - 1;
+            const cColor = i === 0 ? '#10b981' : (i === puntos.length - 1 ? '#ef4444' : '#ffffff');
+            L.circleMarker([p.lat, p.lng], { radius: esExtremo ? 7 : 5, color: '#0c2340', fillColor: cColor, fillOpacity: 1, weight: 2 })
                 .addTo(window.opGrupo)
                 .bindPopup('<b>' + escaparHtml(p.nombre || ('Parada ' + (i + 1))) + '</b>');
         });
-        opMap.fitBounds(linea.getBounds(), { padding: [24, 24] });
     }
     setTimeout(() => opMap.invalidateSize(), 80);
     setTimeout(() => opMap.invalidateSize(), 450);

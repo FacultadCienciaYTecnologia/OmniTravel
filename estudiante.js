@@ -247,41 +247,45 @@ async function loadEstudianteDashboard(skipFetch = false) {
             window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
         }
 
-        // Cargar Ruta en el Mapa
+        // Cargar Ruta en el Mapa siguiendo calles reales (OSRM / GPS)
         const puntosRuta = puntosDeRuta(viaje.ruta);
         if (puntosRuta.length > 0) {
             if(polylineRuta) {
                 if(polylineRuta.getWaypoints) map.removeControl(polylineRuta);
                 else map.removeLayer(polylineRuta);
+                polylineRuta = null;
             }
+            if(window.marcadoresEstudiante) {
+                window.marcadoresEstudiante.forEach(m => map.removeLayer(m));
+            }
+            window.marcadoresEstudiante = [];
 
-            const waypoints = puntosRuta.map(r => L.latLng(r.lat, r.lng));
-            polylineRuta = L.Routing.control({
-                waypoints: waypoints,
-                routeWhileDragging: false,
-                addWaypoints: false,
-                draggableWaypoints: false,
-                fitSelectedRoutes: true,
-                show: false, // Ocultar panel de texto
-                router: L.Routing.osrmv1({
-                    serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1'
-                }),
-                createMarker: function(i, wp, nWps) {
-                    const nombre = puntosRuta[i]?.nombre || `Parada ${i+1}`;
-                    return L.marker(wp.latLng).bindPopup(`<b>${nombre}</b>`);
+            // Inicializar geometría preliminar
+            window.rutaGeometria = normalizarPuntos(puntosRuta);
+
+            polylineRuta = trazarRutaConCalles(map, puntosRuta, {
+                color: 'var(--accent)',
+                weight: 5,
+                opacity: 0.9,
+                onRutaCalculada: (info) => {
+                    if (info && Array.isArray(info.coordenadas) && info.coordenadas.length > 0) {
+                        window.rutaGeometria = normalizarPuntos(info.coordenadas);
+                    }
                 }
-            }).addTo(map);
-
-            polylineRuta.on('routesfound', function(e) {
-                const coords = e.routes && e.routes[0] && e.routes[0].coordinates;
-                if (coords) window.rutaGeometria = normalizarPuntos(coords);
             });
-            polylineRuta.on('routingerror', function() {
-                map.removeControl(polylineRuta);
-                const latlngs = puntosRuta.map(r => [r.lat, r.lng]);
-                polylineRuta = L.polyline(latlngs, {color: 'var(--accent)', weight: 5}).addTo(map);
-                map.fitBounds(polylineRuta.getBounds());
-                window.rutaGeometria = normalizarPuntos(puntosRuta);
+
+            // Marcadores para paradas
+            puntosRuta.forEach((p, idx) => {
+                const esExtremo = idx === 0 || idx === puntosRuta.length - 1;
+                const esOrigen = idx === 0;
+                const m = L.circleMarker([p.lat, p.lng], {
+                    radius: esExtremo ? 8.5 : 6,
+                    color: '#0f172a',
+                    fillColor: esOrigen ? '#10b981' : (idx === puntosRuta.length - 1 ? '#ef4444' : '#38bdf8'),
+                    fillOpacity: 1,
+                    weight: 2
+                }).addTo(map).bindPopup(`<b>${escaparHtml(p.nombre || (esOrigen ? 'Origen' : 'Parada ' + (idx + 1)))}</b>`);
+                window.marcadoresEstudiante.push(m);
             });
 
             llenarSelectorParadas(puntosRuta);
@@ -347,6 +351,26 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
                     const fila = payload.new || payload.old;
                     if (fila && fila.usuario_id === session.id) consultarSolicitudParada();
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
+                    const g = payload.new;
+                    if (g && session.transporte_id && g.transporte_id === session.transporte_id) {
+                        const lat = Number(g.latitud);
+                        const lng = Number(g.longitud);
+                        if (isFinite(lat) && isFinite(lng)) {
+                            if (!busMarker) {
+                                const busIcon = L.divIcon({
+                                    className: 'custom-bus-icon',
+                                    html: `<div style="background:#2563eb; color:white; border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(37,99,235,0.7); border:2px solid #fff; font-size:16px;">🚌</div>`,
+                                    iconSize: [30, 30],
+                                    iconAnchor: [15, 15]
+                                });
+                                busMarker = L.marker([lat, lng], { icon: busIcon }).addTo(map).bindPopup('<b>Tu Transporte en Vivo</b>');
+                            } else {
+                                busMarker.setLatLng([lat, lng]);
+                            }
+                        }
+                    }
                 })
                 .subscribe();
 

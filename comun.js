@@ -273,6 +273,99 @@ function notificarCambioAsiento(viajeId, transporteId) {
     }
 }
 
+// ====== SERVICIO DE ENRUTAMIENTO POR CALLES (OSRM / OPENSTREETMAP GPS) ======
+const RUTA_CACHE = new Map();
+
+async function obtenerRutaCalles(puntos) {
+    if (!Array.isArray(puntos) || puntos.length < 2) return null;
+    const pts = puntosDeRuta(puntos);
+    if (pts.length < 2) return null;
+
+    const cacheKey = pts.map(p => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`).join(';');
+    if (RUTA_CACHE.has(cacheKey)) {
+        return RUTA_CACHE.get(cacheKey);
+    }
+
+    const coordsStr = pts.map(p => `${p.lng},${p.lat}`).join(';');
+    const servers = [
+        `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`,
+        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`
+    ];
+
+    for (const url of servers) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6500);
+            const resp = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            if (data && data.code === 'Ok' && Array.isArray(data.routes) && data.routes.length > 0) {
+                const route = data.routes[0];
+                const rawCoords = route.geometry && route.geometry.coordinates;
+                if (Array.isArray(rawCoords) && rawCoords.length > 0) {
+                    const latlngs = rawCoords.map(c => [c[1], c[0]]);
+                    const res = {
+                        coordenadas: latlngs,
+                        distanciaMetros: route.distance,
+                        duracionSegundos: route.duration,
+                        distanciaKm: (route.distance / 1000).toFixed(1),
+                        duracionMin: Math.max(1, Math.round(route.duration / 60))
+                    };
+                    RUTA_CACHE.set(cacheKey, res);
+                    return res;
+                }
+            }
+        } catch (e) {
+            // Continuar con el siguiente servidor de respaldo
+        }
+    }
+    return null;
+}
+
+function trazarRutaConCalles(mapa, puntos, opciones = {}) {
+    if (!mapa || !Array.isArray(puntos) || puntos.length < 2) return null;
+    const pts = puntosDeRuta(puntos);
+    if (pts.length < 2) return null;
+
+    const color = opciones.color || '#0e4c81';
+    const weight = opciones.weight || 5;
+    const opacity = opciones.opacity != null ? opciones.opacity : 0.85;
+
+    // Trazado base inicial inmediato
+    const latlngsDirectos = pts.map(p => [p.lat, p.lng]);
+    const polyline = L.polyline(latlngsDirectos, {
+        color: color,
+        weight: weight,
+        opacity: opacity,
+        dashArray: opciones.provisionalDash ? '6, 8' : undefined
+    }).addTo(mapa);
+
+    if (opciones.ajustarVista !== false) {
+        mapa.fitBounds(polyline.getBounds(), { padding: opciones.padding || [28, 28] });
+    }
+
+    // Consulta asíncrona a OSRM para seguir las calles reales
+    obtenerRutaCalles(pts).then((rutaInfo) => {
+        if (rutaInfo && Array.isArray(rutaInfo.coordenadas) && rutaInfo.coordenadas.length > 0) {
+            polyline.setLatLngs(rutaInfo.coordenadas);
+            if (polyline.setStyle) {
+                polyline.setStyle({ dashArray: null, color: color, weight: weight, opacity: opacity });
+            }
+            if (opciones.ajustarVista !== false) {
+                mapa.fitBounds(polyline.getBounds(), { padding: opciones.padding || [28, 28] });
+            }
+            if (typeof opciones.onRutaCalculada === 'function') {
+                opciones.onRutaCalculada(rutaInfo);
+            }
+        }
+    }).catch((err) => {
+        console.warn('Servicio de ruta OSRM no disponible en este momento, conservando trazo directo:', err);
+    });
+
+    return polyline;
+}
+
 window.MARGEN_RUTA_METROS = MARGEN_RUTA_METROS;
 window.plazasPorTipo = plazasPorTipo;
 window.nombreTipoTransporte = nombreTipoTransporte;
@@ -294,6 +387,9 @@ window.agregarParadaAprobadaAViaje = agregarParadaAprobadaAViaje;
 window.iniciarCanalAsientos = iniciarCanalAsientos;
 window.suscribirAsientosEnVivo = suscribirAsientosEnVivo;
 window.notificarCambioAsiento = notificarCambioAsiento;
+window.obtenerRutaCalles = obtenerRutaCalles;
+window.trazarRutaConCalles = trazarRutaConCalles;
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarMenuLateral);
 else iniciarMenuLateral();
+

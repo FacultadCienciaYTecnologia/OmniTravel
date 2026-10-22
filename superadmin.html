@@ -126,6 +126,13 @@
                 <div class="card" style="padding: 1.5rem;">
                     <h3 class="mb-2">Recorridos y Paradas Programadas</h3>
                     <p class="text-muted mb-2" id="gps-global-ayuda">Recorridos oficiales y paradas del viaje. Use "Ver en mapa" en Gestión de Viajes para enfocar la ruta.</p>
+                    <div id="gps-route-info" style="display:none; margin-bottom: 0.85rem; padding: 0.55rem 0.95rem; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 0.85rem; color: #1e40af; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#2563eb; box-shadow:0 0 6px #60a5fa;"></span>
+                            <span id="gps-route-text" style="font-weight:600;">Ruta calculada siguiendo calles reales (Servicio OSRM/GPS)</span>
+                        </div>
+                        <div id="gps-route-metrics" style="font-weight:700; color: #1d4ed8; background: #ffffff; padding: 3px 10px; border-radius: 6px; border: 1px solid #dbeafe; font-size:0.85rem;"></div>
+                    </div>
                     <div id="global-map"></div>
                 </div>
             </div>
