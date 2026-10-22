@@ -83,52 +83,46 @@
     <div class="container" style="padding-top: 0;">
         
         <div class="grid grid-2 mb-3" id="panel-control">
-            <!-- PANEL DE CONTROL GPS -->
+            <!-- PANEL DE CONTROL DEL VIAJE -->
             <div class="card" style="display:flex; flex-direction:column; justify-content:center;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <h3 class="mb-2">Control del viaje</h3>
                     <span class="badge" id="estado-ruta" style="background:#e0e7ff; color:#4338ca;">Preparación</span>
                 </div>
-                <p class="text-muted mb-3">Inicie la ruta desde el punto de salida. El GPS avisa a los pasajeros según el modo definido en el viaje.</p>
+                <p class="text-muted mb-3">Inicie la ruta para indicar la salida y avance del viaje de la unidad.</p>
                 
-                <div style="background: #f8fafc; padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
-                    <div>
-                        <h4 style="margin-bottom: 5px; display:flex; align-items:center;">
-                            <span class="gps-status-indicator" id="gps-dot"></span>
-                            Transmisión GPS
-                        </h4>
-                        <p id="gps-text" class="text-muted" style="font-size:0.85rem;">Inactivo</p>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="gps-toggle" disabled>
-                        <span class="slider"></span>
-                    </label>
+                <div style="background: #f8fafc; padding: 1rem 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--card-border); margin-bottom: 1rem;">
+                    <strong style="color:var(--navy); font-size:0.95rem;">Estado de la Unidad:</strong>
+                    <p id="unidad-estado-info" class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">Ruta programada lista para iniciar.</p>
                 </div>
 
-                <div style="display:flex; gap:10px;">
-                    <button class="btn btn-success" id="btn-iniciar" onclick="iniciarRuta()">Iniciar Ruta</button>
-                    <button class="btn" style="background:var(--error); border-color:var(--error); display:none;" id="btn-finalizar" onclick="finalizarRuta()">Finalizar Ruta (Vuelta)</button>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn btn-success btn-auto" id="btn-iniciar" onclick="iniciarRuta()">Iniciar Ruta</button>
+                    <button class="btn btn-auto" style="background:var(--error); border-color:var(--error); color:white; display:none;" id="btn-finalizar" onclick="finalizarRuta()">Finalizar Ruta (Vuelta)</button>
                 </div>
             </div>
 
             <!-- MAPA DEL ADMIN -->
             <div class="card">
-                <h3 class="mb-2">Tu Ubicación</h3>
+                <h3 class="mb-2">Recorrido y Paradas</h3>
                 <p id="route-summary" class="text-muted" style="margin-bottom: 10px; font-weight: bold; font-size: 0.9rem;"></p>
                 <div id="admin-map"></div>
             </div>
         </div>
 
         <div class="guia">
-            <strong>Asignación de pasajeros</strong>
-            <p>La asignación a cada unidad la realiza el superadministrador. Aquí se consulta el manifiesto, la asistencia y las solicitudes de parada.</p>
+            <strong>Asignación y Asistencia</strong>
+            <p>Consulte los pasajeros asignados a su unidad. Los pasajeros en verde ya abordaron y en rojo aún no están dentro.</p>
         </div>
 
         <!-- LISTA DE ABORDAJE (MANIFIESTO) -->
         <div class="card" id="panel-manifiesto">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
-                <h3>Manifiesto de Pasajeros</h3>
-                <span class="badge" id="count-abordo" style="background:var(--accent); color:white;">A bordo: 0</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h3 style="margin-bottom:2px;">Manifiesto de Pasajeros</h3>
+                    <p class="text-muted" style="margin:0; font-size:0.85rem;">En verde: a bordo. En rojo: aún no dentro.</p>
+                </div>
+                <span class="badge" id="count-abordo" style="background:var(--success); color:white; font-size:0.85rem; padding:6px 12px;">A bordo: 0</span>
             </div>
             
             <div class="table-responsive">

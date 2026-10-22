@@ -154,23 +154,42 @@ async function loadAdminDashboard() {
         cargarSolicitudesParada();
         renderAdminCroquis();
 
-        // Si ya está en ruta, forzar encendido de GPS (visual)
+        // Actualización visual de estado de ruta
+        const btnIni = document.getElementById('btn-iniciar');
+        const btnFin = document.getElementById('btn-finalizar');
+        const estRuta = document.getElementById('estado-ruta');
+        const infoUni = document.getElementById('unidad-estado-info');
+
         if(window.viajeEstadoActual === 'en_ruta' || window.viajeEstadoActual === 'en_ruta_ida' || window.viajeEstadoActual === 'en_ruta_vuelta') {
-            document.getElementById('gps-toggle').checked = true;
-            document.getElementById('btn-iniciar').style.display = 'none';
-            document.getElementById('btn-finalizar').style.display = 'inline-block';
+            if (btnIni) btnIni.style.display = 'none';
+            if (btnFin) btnFin.style.display = 'inline-block';
             if(window.viajeEstadoActual === 'en_ruta_vuelta') {
-                document.getElementById('btn-finalizar').innerText = "Viaje Finalizado (Llegamos a la Uni)";
+                if (btnFin) btnFin.innerText = "Finalizar Viaje Completo";
+                if (estRuta) estRuta.innerText = 'Ruta de Retorno en Progreso';
+                if (infoUni) infoUni.innerText = 'Regresando hacia el origen.';
             } else {
-                document.getElementById('btn-finalizar').innerText = "Llegamos al Destino";
+                if (btnFin) btnFin.innerText = "Llegamos al Destino";
+                if (estRuta) estRuta.innerText = 'Ruta de Ida en Progreso';
+                if (infoUni) infoUni.innerText = 'En trayecto hacia el destino.';
             }
-            activarGPS(); // Tratar de reconectar GPS
         } else if (window.viajeEstadoActual === 'espera_vuelta') {
-            document.getElementById('gps-toggle').checked = false;
-            document.getElementById('btn-iniciar').style.display = 'inline-block';
-            document.getElementById('btn-iniciar').innerText = "Iniciar Viaje de Retorno";
-            document.getElementById('btn-iniciar').onclick = iniciarRetorno;
-            document.getElementById('btn-finalizar').style.display = 'none';
+            if (btnIni) {
+                btnIni.style.display = 'inline-block';
+                btnIni.innerText = "Iniciar Viaje de Retorno";
+                btnIni.onclick = iniciarRetorno;
+            }
+            if (btnFin) btnFin.style.display = 'none';
+            if (estRuta) estRuta.innerText = 'En Destino (Espera de Retorno)';
+            if (infoUni) infoUni.innerText = 'En el destino. Listo para iniciar el regreso cuando se indique.';
+        } else {
+            if (btnIni) {
+                btnIni.style.display = 'inline-block';
+                btnIni.innerText = "Iniciar Ruta";
+                btnIni.onclick = iniciarRuta;
+            }
+            if (btnFin) btnFin.style.display = 'none';
+            if (estRuta) estRuta.innerText = 'Preparación';
+            if (infoUni) infoUni.innerText = 'Ruta programada lista para iniciar.';
         }
 
         // ====== SUSCRIPCIONES REALTIME ======
@@ -201,6 +220,7 @@ async function loadAdminDashboard() {
                         lastAdminOccupiedStr = "";
                         cargarManifiesto();
                         renderAdminCroquis();
+                        cargarAnotadosYVehiculos();
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, (payload) => {
@@ -244,6 +264,29 @@ async function loadAdminDashboard() {
                     cargarSolicitudesParada();
                 })
                 .subscribe();
+
+            if (!window.subAsientosRegistradaAdmin) {
+                window.subAsientosRegistradaAdmin = true;
+                suscribirAsientosEnVivo(() => {
+                    if (viajeIdActual) {
+                        lastAdminOccupiedStr = "";
+                        renderAdminCroquis();
+                        cargarManifiesto();
+                        cargarAnotadosYVehiculos();
+                    }
+                });
+
+                if (window.adminCroquisInterval) clearInterval(window.adminCroquisInterval);
+                window.adminCroquisInterval = setInterval(() => {
+                    if (viajeIdActual) {
+                        renderAdminCroquis();
+                        const tabManif = document.getElementById('manifiesto');
+                        if (tabManif && tabManif.classList.contains('active')) cargarManifiesto();
+                        const tabAsig = document.getElementById('asignacion');
+                        if (tabAsig && tabAsig.classList.contains('active')) cargarAnotadosYVehiculos();
+                    }
+                }, 3000);
+            }
         }
 
         setTimeout(() => { map.invalidateSize(); }, 500);
@@ -270,12 +313,10 @@ async function cargarManifiesto() {
         if(p.abordo) abordoCount++;
         
         let statusHtml = '';
-        if(p.asistencia_cancelada) {
-            statusHtml = '<span class="badge" style="background:var(--error); color:white;">Canceló</span>';
-        } else if(p.abordo) {
-            statusHtml = '<span class="badge" style="background:var(--success-light); color:var(--success);">A bordo</span>';
+        if(p.abordo) {
+            statusHtml = '<span class="badge" style="background:var(--success); color:white; font-weight:700;">🟢 A bordo</span>';
         } else {
-            statusHtml = '<span class="badge" style="background:#fef3c7; color:#d97706;">Pendiente</span>';
+            statusHtml = '<span class="badge" style="background:var(--error); color:white; font-weight:700;">🔴 Aún no está dentro</span>';
         }
 
         let paradaNombre = 'Inicio / Por defecto';
@@ -305,12 +346,9 @@ async function cargarManifiesto() {
 
         const phoneLink = p.telefono ? `<a href="tel:${p.telefono}" class="btn btn-outline btn-auto">Llamar</a>` : '-';
         
-        let actionHtml = '-';
-        if (p.rol === 'admin' || p.rol === 'superadmin') {
-            actionHtml = `<button class="btn btn-${p.abordo ? 'outline' : 'success'} btn-auto" onclick="marcarAbordo(this, '${p.id}', ${p.abordo})" style="padding: 2px 5px; font-size: 0.75rem;">
-                ${p.abordo ? 'Bajar (Staff)' : 'Marcar A bordo (Staff)'}
-            </button>`;
-        }
+        const actionHtml = `<button class="btn btn-${p.abordo ? 'outline' : 'success'} btn-auto" onclick="marcarAbordo(this, '${p.id}', ${p.abordo})" style="padding: 3px 8px; font-size: 0.78rem;">
+            ${p.abordo ? 'Bajar' : 'Marcar A bordo'}
+        </button>`;
 
         tbody.innerHTML += `
             <tr>
@@ -356,59 +394,52 @@ async function marcarAbordo(btn, id, estaAbordo) {
     await window.db.from('usuarios').update({ abordo: nuevoEstado, asistencia_cancelada: false }).eq('id', id);
 }
 
-// ====== LÓGICA DE VIAJE ======
-const noSleep = new NoSleep(); // Inicializar NoSleep.js
-
+// ====== LÓGICA DE VIAJE (SIN GPS) ======
 async function iniciarRuta() {
     if(!viajeIdActual) return;
     if(!window.rutaActual || window.rutaActual.length === 0) {
         return Swal.fire('Error', 'El viaje no tiene una ruta definida.', 'error');
     }
 
-    if (!navigator.geolocation) return Swal.fire('Error', 'Navegador no soporta GPS', 'error');
+    const res = await Swal.fire({
+        title: '¿Iniciar la Ruta de Ida?',
+        text: 'Se registrará que la unidad ha iniciado el recorrido.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, iniciar ruta',
+        cancelButtonText: 'Cancelar'
+    });
+    if(!res.isConfirmed) return;
 
-    Swal.fire({ title: 'Iniciando GPS...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-
-    navigator.geolocation.getCurrentPosition(async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        
-        const origen = window.rutaActual[0];
-        const dist = map.distance([lat, lng], [origen.lat, origen.lng]);
-
-        if (dist > 25) { // 25 metros de margen de error GPS
-            Swal.fire('Lejos del Origen', `Debes estar en el punto de inicio para comenzar el viaje. Estás a ${Math.round(dist)} metros.`, 'warning');
-            return;
-        }
-
-        try {
-            await window.db.from('viajes').update({ estado: 'en_ruta_ida' }).eq('id', viajeIdActual);
-            
-            // Habilitar NoSleep para mantener la pantalla encendida y evitar que el navegador suspenda el GPS
-            noSleep.enable();
-            
-            document.getElementById('gps-toggle').checked = true;
-            activarGPS();
-            document.getElementById('btn-iniciar').style.display = 'none';
-            document.getElementById('btn-finalizar').style.display = 'inline-block';
-            document.getElementById('estado-ruta').innerText = 'Ruta de Ida en Progreso';
-            Swal.fire('Ruta Iniciada', 'El GPS transmite en tiempo real. Deja la pantalla encendida o usa la app en segundo plano (NoSleep activo).', 'success');
-            setTimeout(() => window.location.reload(), 1500);
-        } catch(e) { console.error(e); Swal.fire('Error', 'Fallo al iniciar ruta.', 'error'); }
-    }, (err) => {
-        Swal.fire('Error GPS', 'No se pudo obtener tu ubicación. Verifica permisos.', 'error');
-    }, { enableHighAccuracy: true });
+    try {
+        await window.db.from('viajes').update({ estado: 'en_ruta_ida' }).eq('id', viajeIdActual);
+        document.getElementById('btn-iniciar').style.display = 'none';
+        document.getElementById('btn-finalizar').style.display = 'inline-block';
+        document.getElementById('btn-finalizar').innerText = "Llegamos al Destino";
+        document.getElementById('estado-ruta').innerText = 'Ruta de Ida en Progreso';
+        const infoUni = document.getElementById('unidad-estado-info');
+        if (infoUni) infoUni.innerText = 'En trayecto hacia el destino.';
+        Swal.fire('Ruta Iniciada', 'La ruta de ida ha quedado iniciada.', 'success');
+        setTimeout(() => loadAdminDashboard(), 1000);
+    } catch(e) { console.error(e); Swal.fire('Error', 'Fallo al iniciar ruta.', 'error'); }
 }
 
 async function iniciarRetorno() {
     if(!viajeIdActual) return;
+    const res = await Swal.fire({
+        title: '¿Iniciar Ruta de Retorno?',
+        text: 'Se iniciará el viaje de regreso hacia el punto de origen.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, iniciar retorno',
+        cancelButtonText: 'Cancelar'
+    });
+    if(!res.isConfirmed) return;
+
     try {
         await window.db.from('viajes').update({ estado: 'en_ruta_vuelta' }).eq('id', viajeIdActual);
-        noSleep.enable();
-        document.getElementById('gps-toggle').checked = true;
-        activarGPS();
-        Swal.fire('Ruta de Retorno Iniciada', 'El GPS vuelve a transmitir para el regreso.', 'success');
-        setTimeout(() => window.location.reload(), 1500);
+        Swal.fire('Ruta de Retorno Iniciada', 'El viaje de regreso está en curso.', 'success');
+        setTimeout(() => loadAdminDashboard(), 1000);
     } catch(e) { console.error(e); }
 }
 
@@ -416,91 +447,31 @@ async function finalizarRuta() {
     if(!viajeIdActual) return;
     try {
         if(window.viajeEstadoActual === 'en_ruta_ida' || window.viajeEstadoActual === 'en_ruta') {
-            // Llegada al destino intermedio
+            const res = await Swal.fire({
+                title: '¿Llegamos al Destino?',
+                text: 'Se indicará que la unidad llegó al destino intermedio.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Sí, llegamos al destino'
+            });
+            if(!res.isConfirmed) return;
             await window.db.from('viajes').update({ estado: 'espera_vuelta' }).eq('id', viajeIdActual);
-            noSleep.disable();
-            document.getElementById('gps-toggle').checked = false;
-            desactivarGPS();
-            Swal.fire('Destino Alcanzado', 'El GPS se ha pausado. Inicia el regreso cuando estén listos.', 'info');
-            setTimeout(() => window.location.reload(), 2000);
+            Swal.fire('Destino Alcanzado', 'El viaje está en espera hasta la hora de regreso.', 'info');
+            setTimeout(() => loadAdminDashboard(), 1000);
         } else if (window.viajeEstadoActual === 'en_ruta_vuelta') {
-            // Llegada final
+            const res = await Swal.fire({
+                title: '¿Finalizar Viaje Completo?',
+                text: 'Se dará por concluido todo el recorrido y regreso a la institución.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Sí, finalizar viaje'
+            });
+            if(!res.isConfirmed) return;
             await window.db.from('viajes').update({ estado: 'finalizado', inscripcion_abierta: false }).eq('id', viajeIdActual);
-            noSleep.disable();
-            document.getElementById('gps-toggle').checked = false;
-            desactivarGPS();
-            Swal.fire('Viaje Terminado', 'Se ha notificado al Superadmin.', 'success');
-            setTimeout(() => window.location.reload(), 2000);
+            Swal.fire('Viaje Concluido', 'El viaje ha finalizado con éxito.', 'success');
+            setTimeout(() => loadAdminDashboard(), 1000);
         }
     } catch(e) { console.error(e); }
-}
-
-// ====== GPS Y REALTIME ======
-const gpsToggle = document.getElementById('gps-toggle');
-const gpsDot = document.getElementById('gps-dot');
-const gpsText = document.getElementById('gps-text');
-
-gpsToggle.addEventListener('change', (e) => {
-    if (e.target.checked) activarGPS();
-    else desactivarGPS();
-});
-
-function activarGPS() {
-    if (!navigator.geolocation) return Swal.fire('Error', 'Navegador no soporta GPS', 'error');
-    
-    gpsDot.classList.add('active');
-    gpsText.innerText = 'Transmitiendo...';
-    
-    watchId = navigator.geolocation.watchPosition(
-        async (position) => {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            const speed = position.coords.speed || 0;
-            
-            if (!marker) {
-                const busIcon = L.divIcon({ className: 'custom-div-icon', html: "<div style='background:var(--accent); width:15px; height:15px; border-radius:50%; border:2px solid white;'></div>", iconSize: [15, 15] });
-                marker = L.marker([lat, lng], {icon: busIcon}).addTo(map);
-            } else {
-                marker.setLatLng([lat, lng]);
-            }
-            map.setView([lat, lng]);
-            
-            // Insertar log en Supabase
-            if(transporteIdActual) {
-                await window.db.from('gps_logs').insert([{
-                    transporte_id: transporteIdActual,
-                    latitud: lat,
-                    longitud: lng,
-                    velocidad: speed
-                }]);
-            }
-            
-            // Verificación de fin de ruta automático
-            if(window.rutaActual && window.rutaActual.length > 0) {
-                const destino = window.rutaActual[window.rutaActual.length - 1];
-                const distDestino = map.distance([lat, lng], [destino.lat, destino.lng]);
-                if (distDestino <= 20 && document.getElementById('btn-finalizar').style.display !== 'none') {
-                    // Prevenir múltiples llamadas quitando el botón
-                    document.getElementById('btn-finalizar').style.display = 'none';
-                    Swal.fire('Destino Alcanzado', 'Has llegado al punto final de la ruta. Finalizando viaje...', 'info');
-                    finalizarRuta();
-                }
-            }
-        },
-        (error) => {
-            Swal.fire('Error GPS', 'Activa el permiso de ubicación.', 'error');
-            desactivarGPS();
-            gpsToggle.checked = false;
-        },
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
-    );
-}
-
-function desactivarGPS() {
-    if (watchId) navigator.geolocation.clearWatch(watchId);
-    gpsDot.classList.remove('active');
-    gpsText.innerText = 'Inactivo';
-    if(marker) { map.removeLayer(marker); marker = null; }
 }
 
 async function cargarSolicitudesParada() {
@@ -687,6 +658,11 @@ async function resolverSolicitud(p, decision) {
         }).eq('id', p.usuario_id);
     }
     if (decision === 'aprobada') {
+        await agregarParadaAprobadaAViaje(p.viaje_id, {
+            lat: p.lat,
+            lng: p.lng,
+            nombre: info.nombre || 'Parada aceptada'
+        });
         L.marker([p.lat, p.lng]).addTo(map).bindPopup((info.nombre || 'Parada') + ' — aprobada');
     }
     cargarSolicitudesParada();
@@ -803,6 +779,7 @@ async function renderAdminCroquis() {
         const asientosOcupadosInfo = {};
         
         const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.id).sort() : [];
+        occupiedIds.push('MINE:' + (session.asiento || 'none'));
         const occupiedStr = JSON.stringify(occupiedIds);
         
         if (croquisDiv.innerHTML !== '' && lastAdminOccupiedStr === occupiedStr) return;
@@ -874,6 +851,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     Swal.fire('Liberado', 'Tu asiento VIP ha sido liberado.', 'success');
                     lastAdminOccupiedStr = "";
                     renderAdminCroquis();
+                    notificarCambioAsiento(viajeId, transporteId);
                 } catch(e) {}
             }
         });
@@ -901,6 +879,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                 Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                 lastAdminOccupiedStr = "";
                 renderAdminCroquis();
+                notificarCambioAsiento(viajeId, transporteId);
             } catch(e) {
                 Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
                 lastAdminOccupiedStr = "";

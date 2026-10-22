@@ -71,16 +71,30 @@ function puntosDeRuta(ruta) {
 }
 
 function modoGpsDe(viaje) {
-    const ruta = viaje && viaje.ruta;
-    if (!Array.isArray(ruta)) return 'por_transporte';
-    const meta = ruta.find((p) => p && p._meta === 'gps');
-    return meta && meta.modo === 'caravana' ? 'caravana' : 'por_transporte';
+    return 'sin_gps';
 }
 
-function conModoGps(puntos, modo) {
-    const limpios = puntosDeRuta(puntos);
-    limpios.push({ _meta: 'gps', modo: modo === 'caravana' ? 'caravana' : 'por_transporte' });
-    return limpios;
+function conModoGps(puntos) {
+    return puntosDeRuta(puntos);
+}
+
+function etiquetaTransporte(transporte, listaTransportes) {
+    if (!transporte) return 'Sin asignar';
+    const lista = listaTransportes || [];
+    const todosMismoTipo = lista.filter(t => t.tipo === transporte.tipo);
+    const indexTipo = todosMismoTipo.findIndex(t => t.id === transporte.id);
+    const num = indexTipo >= 0 ? indexTipo + 1 : 1;
+    
+    if (transporte.tipo === 'bus_50') {
+        return `Bus ${num}`;
+    }
+    if (transporte.tipo === 'microbus_16' || transporte.tipo === 'microbus_15') {
+        return todosMismoTipo.length > 1 ? `Microbús ${num}` : 'Microbús';
+    }
+    if (transporte.tipo === 'moto' || transporte.tipo === 'moto_2') {
+        return todosMismoTipo.length > 1 ? `Motocicleta ${num}` : 'Motocicletas';
+    }
+    return nombreTipoTransporte(transporte.tipo);
 }
 
 function clasificarSolicitud(row) {
@@ -155,6 +169,110 @@ function iniciarMenuLateral() {
     });
 }
 
+// ====== GESTIÓN Y PERSISTENCIA DE PARADAS EN RUTA ======
+function insertarPuntoEnRuta(puntos, nuevoPunto) {
+    if (!Array.isArray(puntos)) puntos = [];
+    const lista = puntosDeRuta(puntos);
+    const nLat = Number(nuevoPunto.lat);
+    const nLng = Number(nuevoPunto.lng);
+    if (!isFinite(nLat) || !isFinite(nLng)) return lista;
+
+    // Evitar duplicados si ya existe un punto a menos de 20 metros o idéntico
+    const yaExiste = lista.some((p) => distanciaMetros(p.lat, p.lng, nLat, nLng) < 20);
+    if (yaExiste) return lista;
+
+    const item = {
+        lat: nLat,
+        lng: nLng,
+        nombre: nuevoPunto.nombre || 'Parada',
+        tiempo: nuevoPunto.tiempo || ''
+    };
+
+    if (lista.length < 2) {
+        lista.push(item);
+        return lista;
+    }
+
+    let mejorDist = Infinity;
+    let mejorIdx = 0;
+    for (let i = 0; i < lista.length - 1; i++) {
+        const proy = proyectarEnSegmento(nLat, nLng, lista[i], lista[i + 1]);
+        if (proy.dist < mejorDist) {
+            mejorDist = proy.dist;
+            mejorIdx = i;
+        }
+    }
+
+    lista.splice(mejorIdx + 1, 0, item);
+    return lista;
+}
+
+async function agregarParadaAprobadaAViaje(viajeId, paradaAprobada) {
+    if (!viajeId || !paradaAprobada || !window.db) return false;
+    try {
+        const { data: viaje, error } = await window.db.from('viajes').select('id, ruta').eq('id', viajeId).single();
+        if (error || !viaje) return false;
+        const rutaActual = puntosDeRuta(viaje.ruta);
+        const nuevaLista = insertarPuntoEnRuta(rutaActual, {
+            lat: Number(paradaAprobada.lat),
+            lng: Number(paradaAprobada.lng),
+            nombre: paradaAprobada.nombre || 'Parada aprobada'
+        });
+        if (nuevaLista.length !== rutaActual.length) {
+            const rutaFinal = conModoGps(nuevaLista, modoGpsDe(viaje));
+            await window.db.from('viajes').update({ ruta: rutaFinal }).eq('id', viajeId);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error('Error agregando parada al viaje:', e);
+        return false;
+    }
+}
+
+// ====== TIEMPO REAL: ASIGNACIÓN Y RESERVACIÓN DE ASIENTOS ======
+let canalAsientosGlobal = null;
+const listenersAsientos = new Set();
+
+function iniciarCanalAsientos() {
+    if (canalAsientosGlobal || !window.db) return canalAsientosGlobal;
+    try {
+        canalAsientosGlobal = window.db.channel('omni-asientos-live')
+            .on('broadcast', { event: 'asiento_cambiado' }, (payload) => {
+                listenersAsientos.forEach((fn) => {
+                    try { fn(payload.payload || {}); } catch (e) { console.error(e); }
+                });
+            })
+            .subscribe();
+    } catch (e) {
+        console.error('Error inicializando canal asientos:', e);
+    }
+    return canalAsientosGlobal;
+}
+
+function suscribirAsientosEnVivo(callback) {
+    if (typeof callback === 'function') {
+        listenersAsientos.add(callback);
+    }
+    iniciarCanalAsientos();
+    return () => listenersAsientos.delete(callback);
+}
+
+function notificarCambioAsiento(viajeId, transporteId) {
+    try {
+        const canal = iniciarCanalAsientos();
+        if (canal) {
+            canal.send({
+                type: 'broadcast',
+                event: 'asiento_cambiado',
+                payload: { viajeId, transporteId, ts: Date.now() }
+            });
+        }
+    } catch (e) {
+        console.error('Error notificando cambio de asiento:', e);
+    }
+}
+
 window.MARGEN_RUTA_METROS = MARGEN_RUTA_METROS;
 window.plazasPorTipo = plazasPorTipo;
 window.nombreTipoTransporte = nombreTipoTransporte;
@@ -165,10 +283,17 @@ window.puntoSobreRuta = puntoSobreRuta;
 window.puntosDeRuta = puntosDeRuta;
 window.modoGpsDe = modoGpsDe;
 window.conModoGps = conModoGps;
+window.etiquetaTransporte = etiquetaTransporte;
 window.clasificarSolicitud = clasificarSolicitud;
 window.esLecturaMasNueva = esLecturaMasNueva;
 window.normalizarPuntos = normalizarPuntos;
 window.htmlAsientos = htmlAsientos;
 window.iniciarMenuLateral = iniciarMenuLateral;
+window.insertarPuntoEnRuta = insertarPuntoEnRuta;
+window.agregarParadaAprobadaAViaje = agregarParadaAprobadaAViaje;
+window.iniciarCanalAsientos = iniciarCanalAsientos;
+window.suscribirAsientosEnVivo = suscribirAsientosEnVivo;
+window.notificarCambioAsiento = notificarCambioAsiento;
+
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarMenuLateral);
 else iniciarMenuLateral();

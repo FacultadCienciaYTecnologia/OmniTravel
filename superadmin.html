@@ -88,6 +88,7 @@
                 <div class="menu-item" data-target="viajes">Crear Viaje</div>
                 <div class="menu-item" data-target="gestion-viajes">Gestión de Viajes</div>
                 <div class="menu-item" data-target="asignacion">Asignación de pasajeros</div>
+                <div class="menu-item" data-target="asistencia">Control de Asistencia</div>
                 <div class="menu-item" data-target="operacion">Operación del viaje</div>
                 <div class="menu-item" data-target="paradas">Solicitudes de parada <span id="badge-paradas" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
                 <div class="menu-item" data-target="evidencias">Evidencias <span id="badge-evidencias" style="background:var(--gold);color:#fff;border-radius:10px;padding:2px 6px;font-size:0.7rem;margin-left:auto;display:none;">0</span></div>
@@ -123,8 +124,8 @@
                     <button type="button" class="btn btn-auto" style="margin-top:0.7rem;" onclick="document.querySelector('.menu-item[data-target=asignacion]').click()">Ir a asignación de pasajeros</button>
                 </div>
                 <div class="card" style="padding: 1.5rem;">
-                    <h3 class="mb-2">GPS Global en Tiempo Real</h3>
-                    <p class="text-muted mb-2" id="gps-global-ayuda">Últimas ubicaciones de los viajes que no están finalizados. Use "Ver en mapa" en un viaje para seguir esa ruta.</p>
+                    <h3 class="mb-2">Recorridos y Paradas Programadas</h3>
+                    <p class="text-muted mb-2" id="gps-global-ayuda">Recorridos oficiales y paradas del viaje. Use "Ver en mapa" en Gestión de Viajes para enfocar la ruta.</p>
                     <div id="global-map"></div>
                 </div>
             </div>
@@ -191,7 +192,7 @@
                         <p>Está corrigiendo un viaje ya creado. Arrastre los puntos, quite los que sobren o haga clic para agregar otro. Al guardar se reemplaza la ruta anterior.</p>
                         <button type="button" class="btn btn-outline btn-auto" id="btn-cancelar-edicion">Cancelar y crear uno nuevo</button>
                     </div>
-                    <p class="text-muted mb-3">Defina fechas, modo de GPS y el recorrido. Cada clic en el mapa agrega una parada de este viaje. Para corregir un viaje ya guardado, use Editar recorrido en Gestión de Viajes.</p>
+                    <p class="text-muted mb-3">Defina fechas y el recorrido. Cada clic en el mapa agrega una parada de este viaje. Para corregir un viaje ya guardado, use Editar recorrido en Gestión de Viajes.</p>
                     
                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:20px;">
                         <h4 style="margin-bottom:12px;">Datos del viaje</h4>
@@ -216,15 +217,6 @@
                                 <label style="color:#991b1b; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Cierre de Selección</label>
                                 <input type="datetime-local" id="v-cierre-asientos" required style="border-radius:8px; border:1px solid #fca5a5; background:#fff; color:#991b1b;">
                             </div>
-                        </div>
-                        <div style="margin-top:16px;">
-                            <label for="v-modo-gps">Transmisión GPS</label>
-                            <select id="v-modo-gps" required>
-                                <option value="" disabled selected>Seleccione una opción</option>
-                                <option value="por_transporte">Cada transporte transmite su propia ubicación</option>
-                                <option value="caravana">Una sola ubicación para toda la caravana</option>
-                            </select>
-                            <p class="ayuda">Las dos opciones quedan disponibles. Se elige en cada viaje.</p>
                         </div>
                     </div>
 
@@ -308,7 +300,17 @@
                             <input type="text" id="asig-buscar" placeholder="Nombre o documento" oninput="pintarAsignacion(true)">
                         </div>
                     </div>
-                    <label class="checkbox-group" style="margin-bottom:1rem;"><input type="checkbox" id="asig-sin-unidad" onchange="pintarAsignacion(true)"> Solo quienes no tienen transporte en este viaje</label>
+                    <div style="margin-bottom:1rem; display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#f8fafc; padding:10px 14px; border:1px solid var(--line); border-radius:4px;">
+                        <label for="asig-filtro-transporte" style="font-weight:700; color:var(--navy); font-size:0.95rem;">Filtrar inscritos por unidad:</label>
+                        <select id="asig-filtro-transporte" onchange="pintarAsignacion(true)" style="padding:6px 12px; border:1px solid var(--line); border-radius:4px; max-width:340px; font-size:0.95rem; font-weight:600;">
+                            <option value="todos">Todos los inscritos</option>
+                            <option value="bus_1">Bus 1</option>
+                            <option value="bus_2">Bus 2</option>
+                            <option value="microbus">Microbús</option>
+                            <option value="motos">Motocicletas</option>
+                            <option value="sin_unidad">Sin asignar a transporte</option>
+                        </select>
+                    </div>
                     <div id="asig-resumen" class="mb-3"></div>
                     <div class="table-responsive">
                         <table>
@@ -328,10 +330,49 @@
                 </div>
             </div>
 
+            <!-- NUEVA PESTAÑA: CONTROL DE ASISTENCIA SEPARADO POR TRANSPORTES -->
+            <div id="asistencia" class="tab-content">
+                <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+                        <div>
+                            <h3 class="mb-1">Control de Asistencia por Unidad</h3>
+                            <p class="text-muted" style="margin:0;">Supervisión en tiempo real de pasajeros a bordo (verde) y aún no dentro (rojo), separados por transporte.</p>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-auto" onclick="cargarControlAsistencia(true)">🔄 Actualizar Asistencia</button>
+                    </div>
+                    
+                    <div class="grid grid-2 mt-3 mb-3">
+                        <div>
+                            <label for="asist-viaje" style="font-weight:700; color:var(--navy);">Seleccionar Viaje</label>
+                            <select id="asist-viaje" onchange="cargarControlAsistencia()"></select>
+                        </div>
+                        <div>
+                            <label for="asist-buscar" style="font-weight:700; color:var(--navy);">Buscar Pasajero</label>
+                            <input type="text" id="asist-buscar" placeholder="Nombre o documento..." oninput="filtrarListaAsistencia()">
+                        </div>
+                    </div>
+
+                    <!-- Resumen General -->
+                    <div id="asist-resumen-general" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:1rem;">
+                        <!-- Se llena dinámicamente -->
+                    </div>
+
+                    <!-- Filtro rápido por transporte -->
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;" id="asist-tabs-unidades">
+                        <!-- Botones dinámicos: [ Todos | Bus 1 | Bus 2 | Microbús | Motocicletas ] -->
+                    </div>
+                </div>
+
+                <!-- Contenedor con las unidades separadas -->
+                <div id="asist-unidades-container">
+                    <!-- Renderizado dinámico de Bus 1, Bus 2, Microbús, Motocicletas con sus pasajeros y estados verde/rojo -->
+                </div>
+            </div>
+
             <div id="operacion" class="tab-content">
                 <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
                     <h3 class="mb-2">Operación del viaje</h3>
-                    <p class="text-muted mb-3">Desde aquí el superadministrador puede hacer lo mismo que el chofer, en cualquier unidad: iniciar la ruta, transmitir GPS, ver el manifiesto, aprobar paradas y apartar asiento.</p>
+                    <p class="text-muted mb-3">Desde aquí el superadministrador puede operar la unidad: iniciar la ruta, ver el manifiesto, aprobar paradas y apartar asiento.</p>
                     <div class="grid grid-2">
                         <div>
                             <label for="op-viaje">Viaje</label>
@@ -346,13 +387,6 @@
                     <div class="btn-group mt-2">
                         <button type="button" class="btn btn-success btn-auto" id="op-btn-iniciar" onclick="operacionIniciar()">Iniciar ruta</button>
                         <button type="button" class="btn btn-danger btn-auto" id="op-btn-finalizar" style="display:none;" onclick="operacionFinalizar()">Llegamos al destino</button>
-                    </div>
-                    <div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; gap:1rem; background:#f8fafc; border:1px solid var(--line); padding:0.8rem 1rem;">
-                        <div>
-                            <strong id="op-gps-texto">GPS inactivo</strong>
-                            <p class="ayuda" style="margin:0;">La ubicación se publica como la unidad elegida arriba.</p>
-                        </div>
-                        <label class="checkbox-group" style="margin:0;"><input type="checkbox" id="op-gps" onchange="operacionGps(this.checked)"> Transmitir</label>
                     </div>
                 </div>
                 <div class="card" style="padding:1.5rem; margin-bottom:1rem;">

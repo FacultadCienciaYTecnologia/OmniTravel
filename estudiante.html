@@ -89,8 +89,15 @@
                 <div style="text-align: right;">
                     <span class="badge" id="badge-estado" style="background: rgba(255,255,255,0.2); color:white; font-size:1rem; padding: 8px 15px;">Inscrito</span>
                     <div id="panel-asistencia" style="margin-top: 15px; display:none;">
-                        <button id="btn-asistencia" class="btn btn-success" onclick="marcarAsistencia()">Confirmar que ya estoy en la parada</button>
-                        <button id="btn-cancelar-asistencia" class="btn btn-danger" style="display:none; margin-top:8px;" onclick="cancelarAsistencia()">Cancelar asistencia</button>
+                        <span class="badge" id="asistencia-badge" style="font-size:0.85rem; padding:6px 12px; font-weight:700; margin-bottom:8px; display:inline-block;">🔴 Aún no estás dentro</span>
+                        <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                            <button id="btn-asistencia" class="btn btn-success btn-auto" onclick="marcarAsistencia(true)">
+                                🟢 ¡Ya estoy a bordo!
+                            </button>
+                            <button id="btn-cancelar-asistencia" class="btn btn-outline btn-auto" style="border-color:var(--error); color:var(--error); display:none;" onclick="marcarAsistencia(false)">
+                                🔴 Aún no estoy dentro
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -174,7 +181,7 @@
         <div id="panel-mapa" class="card mt-3">
             <div class="seccion-titulo">
                 <h3>Recorrido</h3>
-                <p id="gps-modo-texto">La ruta es la misma para toda la caravana.</p>
+                <p>Ruta programada, paradas oficiales y paradas solicitadas aprobadas.</p>
             </div>
             <div id="student-map"></div>
             <button type="button" class="btn btn-danger mapa-accion" id="btn-parada-ruta" onclick="iniciarSeleccionParada()">Solicitar parada en el mapa</button>

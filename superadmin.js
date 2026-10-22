@@ -36,6 +36,7 @@ menuItems.forEach(item => {
         }
         if(item.dataset.target === 'evidencias') cargarEvidencias();
         if(item.dataset.target === 'asignacion') cargarAsignacionPanel();
+        if(item.dataset.target === 'asistencia') cargarControlAsistencia();
         if(item.dataset.target === 'operacion') cargarOperacion();
         if(item.dataset.target === 'paradas') cargarSolicitudesSuper();
     });
@@ -135,10 +136,26 @@ async function loadDashboard() {
                         }
                     });
                     
-                    // Actualizar croquis en tiempo real si el superadmin lo está viendo
-                    if(document.getElementById('admin-vehiculo-select') && document.getElementById('admin-vehiculo-select').value) {
-                        lastAdminOccupiedStr = "";
-                        renderAdminCroquis(window.croquisOrigen || 'admin');
+                    // Actualizar croquis y asignación en tiempo real si el superadmin lo está viendo
+                    lastAdminOccupiedStr = "";
+                    renderAdminCroquis(window.croquisOrigen || 'admin');
+                    renderAdminCroquis('operacion');
+
+                    const asigTab = document.getElementById('asignacion');
+                    if (asigTab && asigTab.classList.contains('active')) {
+                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
+                        if (!buscando) pintarAsignacion(false);
+                    }
+
+                    const asistTab = document.getElementById('asistencia');
+                    if (asistTab && asistTab.classList.contains('active')) {
+                        const buscandoAsis = document.activeElement && document.activeElement.id === 'asist-buscar';
+                        if (!buscandoAsis) cargarControlAsistencia(true);
+                    }
+
+                    const operTab = document.getElementById('operacion');
+                    if (operTab && operTab.classList.contains('active')) {
+                        cargarOperacionUnidad();
                     }
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
@@ -153,11 +170,37 @@ async function loadDashboard() {
                     if (info.estado !== 'pendiente') return;
                     await evaluarSolicitudSuper(p.id);
                 })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
-                    if (window.currentViajeMonitoreo) verRutaActiva(window.currentViajeMonitoreo, true);
-                    else pintarGpsGlobal();
-                })
                 .subscribe();
+
+            if (!window.subAsientosRegistrada) {
+                window.subAsientosRegistrada = true;
+                suscribirAsientosEnVivo(() => {
+                    lastAdminOccupiedStr = "";
+                    renderAdminCroquis(window.croquisOrigen || 'admin');
+                    renderAdminCroquis('operacion');
+                    const tabAsig = document.getElementById('asignacion');
+                    if (tabAsig && tabAsig.classList.contains('active')) {
+                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
+                        if (!buscando) pintarAsignacion(false);
+                    }
+                });
+
+                if (window.adminCroquisInterval) clearInterval(window.adminCroquisInterval);
+                window.adminCroquisInterval = setInterval(() => {
+                    const divAdmin = document.getElementById('admin-croquis-container');
+                    const divOp = document.getElementById('operacion');
+                    const hayAdmin = divAdmin && divAdmin.style.display !== 'none';
+                    const hayOp = divOp && divOp.classList.contains('active');
+                    if (hayAdmin) renderAdminCroquis('admin');
+                    if (hayOp) renderAdminCroquis('operacion');
+
+                    const tabAsig = document.getElementById('asignacion');
+                    if (tabAsig && tabAsig.classList.contains('active')) {
+                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
+                        if (!buscando) pintarAsignacion(false);
+                    }
+                }, 3000);
+            }
         }
 
     } catch(e) { console.error("Error cargando dashboard", e); }
@@ -310,7 +353,7 @@ async function cambiarRol(id, nuevoRol) {
 async function vaciarBaseDeDatos() {
     const { value: code } = await Swal.fire({
         title: 'VACIADO DE BASE DE DATOS',
-        text: 'Esta acción borrará TODOS los usuarios, viajes, transportes y GPS, excepto tu propia cuenta de Superadmin. Ingresa el código de seguridad para proceder:',
+        text: 'Esta acción borrará TODOS los usuarios, viajes y transportes, excepto tu propia cuenta de Superadmin. Ingresa el código de seguridad para proceder:',
         input: 'password',
         icon: 'warning',
         showCancelButton: true,
@@ -439,7 +482,6 @@ function cancelarEdicionViaje() {
     document.getElementById('v-fecha').value = '';
     document.getElementById('v-inicio-asientos').value = '';
     document.getElementById('v-cierre-asientos').value = '';
-    document.getElementById('v-modo-gps').value = '';
     window.metaParadas = [];
     routeControl.setWaypoints([]);
     pintarParadasEditor();
@@ -463,8 +505,41 @@ async function editarRecorrido(id) {
     document.getElementById('v-fecha').value = aDatetimeLocal(viaje.fecha_salida);
     document.getElementById('v-inicio-asientos').value = aDatetimeLocal(viaje.inicio_asientos);
     document.getElementById('v-cierre-asientos').value = aDatetimeLocal(viaje.cierre_asientos);
-    document.getElementById('v-modo-gps').value = modoGpsDe(viaje);
-    const puntos = puntosDeRuta(viaje.ruta);
+    
+    let puntos = puntosDeRuta(viaje.ruta);
+
+    // Integrar automáticamente paradas aprobadas de estudiantes que aún no estén en la ruta
+    try {
+        const { data: solsAprobadas } = await window.db
+            .from('paradas_intermitentes')
+            .select('*')
+            .eq('viaje_id', id);
+
+        if (solsAprobadas && solsAprobadas.length > 0) {
+            let huboNuevas = false;
+            solsAprobadas.forEach((s) => {
+                const inf = clasificarSolicitud(s);
+                if (inf.estado === 'aprobada' && isFinite(Number(s.lat)) && isFinite(Number(s.lng))) {
+                    const prevLen = puntos.length;
+                    puntos = insertarPuntoEnRuta(puntos, {
+                        lat: Number(s.lat),
+                        lng: Number(s.lng),
+                        nombre: inf.nombre || 'Parada aceptada'
+                    });
+                    if (puntos.length > prevLen) huboNuevas = true;
+                }
+            });
+            if (huboNuevas) {
+                const rutaSincronizada = conModoGps(puntos, modoGpsDe(viaje));
+                await window.db.from('viajes').update({ ruta: rutaSincronizada }).eq('id', id);
+                viaje.ruta = rutaSincronizada;
+                window.viajeEnEdicion = viaje;
+            }
+        }
+    } catch (e) {
+        console.warn('Error sincronizando paradas de estudiantes:', e);
+    }
+
     window.metaParadas = puntos.map((p, i) => ({
         lat: p.lat,
         lng: p.lng,
@@ -535,9 +610,8 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
     const fecha = document.getElementById('v-fecha').value;
     const inicio_asientos = document.getElementById('v-inicio-asientos').value;
     const cierre_asientos = document.getElementById('v-cierre-asientos').value;
-    const modo_gps = document.getElementById('v-modo-gps').value;
     
-    if(!titulo || !fecha || !inicio_asientos || !cierre_asientos || !modo_gps) return Swal.fire('Datos incompletos', 'Complete el nombre, las fechas y el modo de GPS.', 'warning');
+    if(!titulo || !fecha || !inicio_asientos || !cierre_asientos) return Swal.fire('Datos incompletos', 'Complete el nombre y las fechas del viaje.', 'warning');
     
     const waypoints = leerWaypoints();
     if(waypoints.length < 2) return Swal.fire('Error', 'Debe haber al menos dos puntos en el mapa: salida y destino.', 'warning');
@@ -562,7 +636,7 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
     });
 
     try {
-        const ruta = conModoGps(waypointsJSON, modo_gps);
+        const ruta = waypointsJSON;
         const editando = window.viajeEnEdicion;
         const { error } = editando
             ? await window.db.from('viajes').update({
@@ -629,7 +703,6 @@ function renderViajes(viajes) {
                     <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
                     <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
                     <p>Estado: <b>${escaparHtml(v.estado).toUpperCase()}</b></p>
-                    <p>GPS: <b>${modoGpsDe(v) === 'caravana' ? 'Caravana' : 'Por transporte'}</b></p>
                 </div>
                 <div class="btn-group" style="display:flex; gap:5px; flex-wrap:wrap;">
                     ${btnTransportes}
@@ -666,12 +739,7 @@ async function editarViaje(id) {
             `<label style="display:block; margin-top:10px; font-size:14px;">Inicio Selección Asientos:</label>` +
             `<input id="swal-v-inicio" type="datetime-local" class="swal2-input" value="${viaje.inicio_asientos.slice(0,16)}">` +
             `<label style="display:block; margin-top:10px; font-size:14px;">Cierre de selección de asientos</label>` +
-            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">` +
-            `<label style="display:block; margin-top:10px; font-size:14px;">Transmisión GPS</label>` +
-            `<select id="swal-v-gps" class="swal2-input">
-                <option value="por_transporte" ${modoGpsDe(viaje) !== 'caravana' ? 'selected' : ''}>Cada transporte transmite su ubicación</option>
-                <option value="caravana" ${modoGpsDe(viaje) === 'caravana' ? 'selected' : ''}>Una sola ubicación para la caravana</option>
-            </select>`,
+            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">`,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Guardar Cambios',
@@ -680,21 +748,18 @@ async function editarViaje(id) {
                 titulo: document.getElementById('swal-v-titulo').value,
                 fecha_salida: document.getElementById('swal-v-fecha').value,
                 inicio_asientos: document.getElementById('swal-v-inicio').value,
-                cierre_asientos: document.getElementById('swal-v-cierre').value,
-                modo_gps: document.getElementById('swal-v-gps').value
+                cierre_asientos: document.getElementById('swal-v-cierre').value
             }
         }
     });
 
     if (formValues) {
         try {
-            const modo = formValues.modo_gps;
             await window.db.from('viajes').update({
                 titulo: formValues.titulo,
                 fecha_salida: formValues.fecha_salida,
                 inicio_asientos: formValues.inicio_asientos,
-                cierre_asientos: formValues.cierre_asientos,
-                ruta: conModoGps(puntosDeRuta(viaje.ruta), modo)
+                cierre_asientos: formValues.cierre_asientos
             }).eq('id', id);
             Swal.fire('Guardado', 'El viaje ha sido actualizado.', 'success');
             loadDashboard();
@@ -798,9 +863,9 @@ document.getElementById('form-transporte').addEventListener('submit', async (e) 
     const adminIdRaw = document.getElementById('t-admin-select').value;
     const adminId = (adminIdRaw && adminIdRaw.trim() !== '') ? adminIdRaw.trim() : null;
 
-    // Solo el autobús de 50 plazas requiere obligatoriamente un chofer asignado para GPS
+    // Solo el autobús de 50 plazas requiere obligatoriamente un chofer asignado
     if (tipo === 'bus_50' && !adminId) {
-        Swal.fire('Chofer Requerido', 'Para un Autobús de 50 plazas es obligatorio asignar un Administrador/Chofer que transmita el GPS.', 'warning');
+        Swal.fire('Chofer Requerido', 'Para un Autobús de 50 plazas es obligatorio asignar un Administrador/Chofer responsable de la unidad.', 'warning');
         btn.disabled = false;
         return;
     }
@@ -1030,7 +1095,7 @@ let lastAdminOccupiedStr = "";
 // ====== VIP CROQUIS ======
 async function renderAdminCroquis(origen) {
     if (origen === 'operacion' || origen === 'admin') window.croquisOrigen = origen;
-    const desdeOperacion = window.croquisOrigen === 'operacion';
+    const desdeOperacion = origen === 'operacion' || (!origen && window.croquisOrigen === 'operacion');
     const selCroquis = document.getElementById(desdeOperacion ? 'op-transporte' : 'admin-vehiculo-select');
     const transporteId = selCroquis ? selCroquis.value : '';
     const croquisDiv = document.getElementById(desdeOperacion ? 'op-croquis' : 'admin-croquis');
@@ -1038,7 +1103,6 @@ async function renderAdminCroquis(origen) {
     
     if(!transporteId) {
         croquisDiv.innerHTML = '<div class="text-muted">Selecciona un vehículo para ver los asientos.</div>';
-        if (adminCroquisInterval) clearInterval(adminCroquisInterval);
         return;
     }
 
@@ -1051,6 +1115,7 @@ async function renderAdminCroquis(origen) {
         const asientosOcupadosInfo = {};
         
         const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.id).sort() : [];
+        occupiedIds.push('MINE:' + (session.asiento || 'none'));
         const occupiedStr = JSON.stringify(occupiedIds);
         
         if (croquisDiv.innerHTML !== '' && lastAdminOccupiedStr === occupiedStr) return;
@@ -1061,8 +1126,7 @@ async function renderAdminCroquis(origen) {
         }
 
         const miAsiento = session.asiento;
-        const transporteSel = document.getElementById('admin-vehiculo-select').value;
-        croquisDiv.innerHTML = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteSel));
+        croquisDiv.innerHTML = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId));
 
     } catch(e) {
         console.error(e);
@@ -1126,6 +1190,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     Swal.fire('Liberado', 'Tu asiento VIP ha sido liberado.', 'success');
                     lastAdminOccupiedStr = "";
                     renderAdminCroquis(window.croquisOrigen || 'admin');
+                    notificarCambioAsiento(viajeId, transporteId);
                 } catch(e) {}
             }
         });
@@ -1149,6 +1214,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                     Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                     lastAdminOccupiedStr = "";
                     renderAdminCroquis(window.croquisOrigen || 'admin');
+                    notificarCambioAsiento(viajeId, transporteId);
                 } catch(e) {
                     Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
                     lastAdminOccupiedStr = "";
@@ -1192,6 +1258,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                 Swal.fire('¡Éxito!', 'Asiento reservado.', 'success');
                 lastAdminOccupiedStr = "";
                 renderAdminCroquis(window.croquisOrigen || 'admin');
+                notificarCambioAsiento(viajeId, transporteId);
             } catch(e) { Swal.fire('Error', 'Fallo al reservar.', 'error'); }
         }
     });
@@ -1291,20 +1358,52 @@ async function pintarAsignacion(usarCache) {
     }
     const transportes = window.transportesAsignacion || [];
     const q = ((document.getElementById('asig-buscar') || {}).value || '').trim().toLowerCase();
-    const soloSin = document.getElementById('asig-sin-unidad') && document.getElementById('asig-sin-unidad').checked;
+    const filtroEl = document.getElementById('asig-filtro-transporte');
+    const filtroVal = filtroEl ? filtroEl.value : 'todos';
+
+    // Identificar Bus 1, Bus 2, Microbús, Motocicletas
+    const buses = transportes.filter(t => t.tipo === 'bus_50');
+    const microbuses = transportes.filter(t => t.tipo === 'microbus_16' || t.tipo === 'microbus_15');
+    const motos = transportes.filter(t => t.tipo === 'moto' || t.tipo === 'moto_2');
+
+    const bus1Id = buses[0] ? buses[0].id : null;
+    const bus2Id = buses[1] ? buses[1].id : null;
+    const microbusIds = new Set(microbuses.map(t => t.id));
+    const motoIds = new Set(motos.map(t => t.id));
     const idsUnidad = new Set(transportes.map((t) => t.id));
     const cupo = {};
     (window.personasAsignacion || []).forEach((u) => {
         if (u.transporte_id && idsUnidad.has(u.transporte_id)) cupo[u.transporte_id] = (cupo[u.transporte_id] || 0) + 1;
     });
+
     if (resumen) {
         resumen.innerHTML = transportes.length
-            ? '<div class="btn-group">' + transportes.map((t, i) => `<span class="badge" style="background:#f4f7fa;color:#0c2340;border:1px solid #cfd6de;">${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1}: ${cupo[t.id] || 0}/${plazasPorTipo(t.tipo)}</span>`).join('') + '</div>'
+            ? '<div class="btn-group">' + transportes.map((t) => {
+                const label = etiquetaTransporte(t, transportes);
+                return `<span class="badge" style="background:#f4f7fa;color:#0c2340;border:1px solid #cfd6de;">${escaparHtml(label)}: ${cupo[t.id] || 0}/${plazasPorTipo(t.tipo)}</span>`;
+            }).join('') + '</div>'
             : '<p class="aviso aviso-info">Este viaje no tiene transportes. Créelos en Gestión de Viajes con el botón Transportes.</p>';
     }
+
     let lista = (window.personasAsignacion || []).slice().sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo), 'es'));
     if (q) lista = lista.filter((u) => String(u.nombre_completo || '').toLowerCase().includes(q) || String(u.dni || '').toLowerCase().includes(q));
-    if (soloSin) lista = lista.filter((u) => !u.transporte_id || !idsUnidad.has(u.transporte_id));
+
+    // Filtro para solo tener los inscritos en Bus 1, Bus 2, Microbús y Motocicletas
+    if (filtroVal === 'bus_1') {
+        lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus1Id);
+    } else if (filtroVal === 'bus_2') {
+        lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus2Id);
+    } else if (filtroVal === 'microbus') {
+        lista = lista.filter((u) => u.viaje_id === viajeId && microbusIds.has(u.transporte_id));
+    } else if (filtroVal === 'motos') {
+        lista = lista.filter((u) => u.viaje_id === viajeId && motoIds.has(u.transporte_id));
+    } else if (filtroVal === 'sin_unidad') {
+        lista = lista.filter((u) => u.viaje_id === viajeId && (!u.transporte_id || !idsUnidad.has(u.transporte_id)));
+    } else {
+        // 'todos': solo tener los inscritos en este viaje
+        lista = lista.filter((u) => u.viaje_id === viajeId);
+    }
+
     if (!lista.length) {
         tbody.innerHTML = '<tr><td colspan="4">No hay estudiantes en este filtro.</td></tr>';
         return;
@@ -1324,12 +1423,13 @@ async function pintarAsignacion(usarCache) {
         if (u.transporte_id && !enEstaUnidad) {
             opciones = '<option value="__actual" selected disabled>Asignado en otro viaje</option>' + opciones;
         }
-        transportes.forEach((t, i) => {
+        transportes.forEach((t) => {
             const plazas = plazasPorTipo(t.tipo);
             const usados = cupo[t.id] || 0;
             const lleno = usados >= plazas && u.transporte_id !== t.id;
             const selected = u.transporte_id === t.id ? ' selected' : '';
-            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1} (${usados}/${plazas})</option>`;
+            const label = etiquetaTransporte(t, transportes);
+            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(label)} (${usados}/${plazas})</option>`;
         });
         return `<tr>
             <td>${escaparHtml(u.nombre_completo)}</td>
@@ -1370,6 +1470,7 @@ async function asignarDesdePanel(usuarioId, transporteId) {
             ).eq('id', usuarioId);
             window.personasAsignacion = null;
             await pintarAsignacion();
+            notificarCambioAsiento(viajeId, null);
             return;
         }
         if (actual && actual.viaje_id && actual.viaje_id !== viajeId) {
@@ -1404,6 +1505,7 @@ async function asignarDesdePanel(usuarioId, transporteId) {
         if (error) throw error;
         window.personasAsignacion = null;
         await pintarAsignacion();
+        notificarCambioAsiento(viajeId, transporteId);
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Transporte asignado. El estudiante ya puede elegir asiento.', showConfirmButton: false, timer: 2200 });
     } catch (e) {
         console.error(e);
@@ -1797,6 +1899,13 @@ async function resolverSolicitudGuardada(p, decision) {
             parada_id: JSON.stringify({ lat: p.lat, lng: p.lng, nombre: info.nombre || 'Punto sobre la ruta', origen: 'otro' })
         }).eq('id', p.usuario_id);
     }
+    if (decision === 'aprobada') {
+        await agregarParadaAprobadaAViaje(p.viaje_id, {
+            lat: p.lat,
+            lng: p.lng,
+            nombre: info.nombre || 'Parada aceptada'
+        });
+    }
 }
 
 async function buscarYGuardarParada() {
@@ -1828,26 +1937,16 @@ document.getElementById('btn-bib-mapa').addEventListener('click', () => {
 });
 
 async function pintarGpsGlobal() {
-    const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado').neq('estado', 'finalizado');
+    if (window.currentViajeMonitoreo) {
+        verRutaActiva(window.currentViajeMonitoreo);
+        return;
+    }
+    const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, ruta').neq('estado', 'finalizado');
     if (!viajes || !viajes.length) return;
-    const idsViaje = viajes.map((v) => v.id);
-    const { data: trans } = await window.db.from('transportes').select('id, viaje_id, tipo').in('viaje_id', idsViaje);
-    if (!trans || !trans.length) return;
-    const { data: logs } = await window.db.from('gps_logs').select('*').limit(80);
-    if (window.marcadoresGlobales) window.marcadoresGlobales.forEach((m) => globalMap.removeLayer(m));
-    window.marcadoresGlobales = [];
-    const porTransporte = {};
-    (logs || []).forEach((g) => {
-        const prev = porTransporte[g.transporte_id];
-        if (!prev || esLecturaMasNueva(g, prev)) porTransporte[g.transporte_id] = g;
-    });
-    trans.forEach((t) => {
-        const g = porTransporte[t.id];
-        if (!g) return;
-        const viaje = viajes.find((v) => v.id === t.viaje_id);
-        const m = L.marker([g.latitud, g.longitud]).addTo(globalMap).bindPopup(`${viaje ? viaje.titulo : 'Viaje'} — ${nombreTipoTransporte(t.tipo)}`);
-        window.marcadoresGlobales.push(m);
-    });
+    const conRuta = viajes.find((v) => puntosDeRuta(v.ruta).length > 1) || viajes[0];
+    if (conRuta) {
+        verRutaActiva(conRuta.id);
+    }
 }
 
 async function verRutaActiva(viajeId, soloMarcadores) {
@@ -1855,35 +1954,50 @@ async function verRutaActiva(viajeId, soloMarcadores) {
     document.querySelector('.menu-item[data-target="dashboard"]').click();
     const { data: viaje } = await window.db.from('viajes').select('*').eq('id', viajeId).single();
     if (!viaje) return;
-    if (!soloMarcadores) {
-        if (window.rutaMonitoreo) {
-            if (window.rutaMonitoreo.getWaypoints) globalMap.removeControl(window.rutaMonitoreo);
-            else globalMap.removeLayer(window.rutaMonitoreo);
-        }
-        const puntos = puntosDeRuta(viaje.ruta);
-        if (puntos.length > 1) {
-            window.rutaMonitoreo = L.polyline(puntos.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(globalMap);
-            globalMap.fitBounds(window.rutaMonitoreo.getBounds());
-        }
+
+    if (window.rutaMonitoreo) {
+        if (window.rutaMonitoreo.getWaypoints) globalMap.removeControl(window.rutaMonitoreo);
+        else globalMap.removeLayer(window.rutaMonitoreo);
     }
-    const { data: trans } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeId);
-    const { data: logs } = await window.db.from('gps_logs').select('*').limit(80);
     if (window.marcadoresViaje) window.marcadoresViaje.forEach((m) => globalMap.removeLayer(m));
     window.marcadoresViaje = [];
-    const modo = modoGpsDe(viaje);
-    const propios = (logs || []).filter((g) => (trans || []).some((t) => t.id === g.transporte_id));
-    propios.sort((a, b) => esLecturaMasNueva(a, b) ? -1 : 1);
-    if (modo === 'caravana') {
-        if (propios[0]) window.marcadoresViaje.push(L.marker([propios[0].latitud, propios[0].longitud]).addTo(globalMap).bindPopup('Caravana — ' + viaje.titulo));
-    } else {
-        const visto = {};
-        propios.forEach((g) => {
-            if (visto[g.transporte_id]) return;
-            visto[g.transporte_id] = true;
-            const t = (trans || []).find((x) => x.id === g.transporte_id);
-            window.marcadoresViaje.push(L.marker([g.latitud, g.longitud]).addTo(globalMap).bindPopup(nombreTipoTransporte(t && t.tipo)));
+
+    const puntos = puntosDeRuta(viaje.ruta);
+    if (puntos.length > 1) {
+        window.rutaMonitoreo = L.polyline(puntos.map((r) => [r.lat, r.lng]), { color: '#0e4c81', weight: 4 }).addTo(globalMap);
+        globalMap.fitBounds(window.rutaMonitoreo.getBounds(), { padding: [30, 30] });
+
+        puntos.forEach((p, idx) => {
+            const esExtremo = idx === 0 || idx === puntos.length - 1;
+            const m = L.circleMarker([p.lat, p.lng], {
+                radius: esExtremo ? 8 : 6,
+                color: '#0c2340',
+                fillColor: idx === 0 ? '#10b981' : (idx === puntos.length - 1 ? '#ef4444' : '#3b82f6'),
+                fillOpacity: 1,
+                weight: 2
+            }).addTo(globalMap).bindPopup(`<b>${escaparHtml(p.nombre || (idx === 0 ? 'Origen' : (idx === puntos.length - 1 ? 'Destino' : 'Parada ' + (idx + 1))))}</b><br><span style="color:#0e4c81;font-weight:600;">Parada programada</span>`);
+            window.marcadoresViaje.push(m);
         });
     }
+
+    const { data: paradasAprobadas } = await window.db.from('paradas_intermitentes').select('*').eq('viaje_id', viajeId).eq('estado', 'aprobada');
+    if (paradasAprobadas && paradasAprobadas.length) {
+        paradasAprobadas.forEach((s) => {
+            const latN = Number(s.lat);
+            const lngN = Number(s.lng);
+            if (!isFinite(latN) || !isFinite(lngN)) return;
+            const info = clasificarSolicitud(s);
+            const m = L.circleMarker([latN, lngN], {
+                radius: 7,
+                color: '#854d0e',
+                fillColor: '#eab308',
+                fillOpacity: 1,
+                weight: 2
+            }).addTo(globalMap).bindPopup(`<b>${escaparHtml(info.nombre || 'Parada aprobada')}</b><br><span style="color:#854d0e;font-weight:600;">Solicitud de estudiante (Aprobada)</span><br><small>${info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje'}</small>`);
+            window.marcadoresViaje.push(m);
+        });
+    }
+
     setTimeout(() => globalMap.invalidateSize(), 200);
 }
 
@@ -2020,8 +2134,8 @@ async function cargarOperacion() {
     dibujarRutaOperacion();
     const { data: unidades } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viaje.id);
     window.operacionUnidades = unidades || [];
-    window.operacionUnidades.forEach((t, i) => {
-        unidad.innerHTML += `<option value="${t.id}">${escaparHtml(nombreTipoTransporte(t.tipo))} ${i + 1}</option>`;
+    window.operacionUnidades.forEach((t) => {
+        unidad.innerHTML += `<option value="${t.id}">${escaparHtml(etiquetaTransporte(t, window.operacionUnidades))}</option>`;
     });
     if (window.operacionTransporteId && window.operacionUnidades.some((t) => t.id === window.operacionTransporteId)) {
         unidad.value = window.operacionTransporteId;
@@ -2112,10 +2226,12 @@ async function cargarOperacionUnidad() {
     } else {
         tbody.innerHTML = lista.map((p) => {
             const parada = leerParada(p.parada_id, window.rutaOperacion);
-            const estado = p.asistencia_cancelada ? 'Canceló' : (p.abordo ? 'A bordo' : 'Pendiente');
-            const accion = (p.rol === 'admin' || p.rol === 'superadmin')
-                ? `<button type="button" class="btn btn-outline btn-auto" onclick="operacionAbordo('${p.id}', ${p.abordo ? 'false' : 'true'})">${p.abordo ? 'Bajar' : 'Marcar a bordo'}</button>`
-                : '—';
+            const estado = p.abordo
+                ? '<span style="color:#10b981;font-weight:700;background:rgba(16,185,129,0.12);padding:4px 10px;border-radius:12px;display:inline-block;">🟢 A bordo</span>'
+                : (p.asistencia_cancelada
+                    ? '<span style="color:#ef4444;font-weight:700;background:rgba(239,68,68,0.12);padding:4px 10px;border-radius:12px;display:inline-block;">🔴 Canceló</span>'
+                    : '<span style="color:#ef4444;font-weight:700;background:rgba(239,68,68,0.12);padding:4px 10px;border-radius:12px;display:inline-block;">🔴 Aún no está dentro</span>');
+            const accion = `<button type="button" class="btn ${p.abordo ? 'btn-outline' : 'btn-primary'} btn-auto" style="padding:4px 10px;font-size:0.8rem;" onclick="operacionAbordo('${p.id}', ${p.abordo ? 'false' : 'true'})">${p.abordo ? 'Bajar' : 'Marcar a bordo'}</button>`;
             return `<tr><td>${escaparHtml(p.nombre_completo)}</td><td>${escaparHtml(p.asiento || '—')}</td><td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td><td>${estado}</td><td>${accion}</td></tr>`;
         }).join('');
     }
@@ -2125,6 +2241,7 @@ async function cargarOperacionUnidad() {
 async function operacionAbordo(id, abordo) {
     await window.db.from('usuarios').update({ abordo: abordo === true || abordo === 'true', asistencia_cancelada: false }).eq('id', id);
     cargarOperacionUnidad();
+    if (typeof cargarControlAsistencia === 'function') cargarControlAsistencia(false);
 }
 
 async function cargarParadasOperacion() {
@@ -2164,75 +2281,368 @@ async function operacionIniciar() {
     const transporteId = document.getElementById('op-transporte').value;
     if (!viajeId || !transporteId) return Swal.fire('Unidad', 'Elija el viaje y la unidad que va a operar.', 'warning');
     if (!window.rutaOperacion || window.rutaOperacion.length < 2) return Swal.fire('Ruta', 'Este viaje no tiene recorrido.', 'warning');
-    if (!navigator.geolocation) return Swal.fire('GPS', 'Este navegador no entrega la ubicación.', 'error');
     const regreso = window.operacionEstado === 'espera_vuelta';
-    Swal.fire({ title: 'Comprobando ubicación', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-        if (!regreso) {
-            const origen = window.rutaOperacion[0];
-            const dist = distanciaMetros(pos.coords.latitude, pos.coords.longitude, origen.lat, origen.lng);
-            if (dist > 25) {
-                Swal.fire('Lejos del origen', 'Para iniciar la ida hay que estar a 25 metros o menos del primer punto. Está a ' + Math.round(dist) + ' metros.', 'warning');
-                return;
-            }
-        }
-        const estado = regreso ? 'en_ruta_vuelta' : 'en_ruta_ida';
-        const { error } = await window.db.from('viajes').update({ estado: estado }).eq('id', viajeId);
-        if (error) return Swal.fire('No se inició', 'No se pudo cambiar el estado del viaje.', 'error');
-        opNoSleep.enable();
-        document.getElementById('op-gps').checked = true;
-        operacionGps(true);
-        Swal.fire('Ruta en curso', regreso ? 'El regreso quedó iniciado.' : 'La ida quedó iniciada y el GPS se está enviando.', 'success');
-        cargarOperacion();
-    }, () => Swal.fire('GPS', 'No se obtuvo la ubicación.', 'error'), { enableHighAccuracy: true });
+
+    const resp = await Swal.fire({
+        title: regreso ? '¿Iniciar viaje de regreso?' : '¿Iniciar ruta de ida?',
+        text: regreso ? 'Se notificará el inicio del viaje de retorno a todos los participantes.' : 'El viaje pasará a estado En ruta (ida).',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, iniciar ruta',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!resp.isConfirmed) return;
+
+    const estado = regreso ? 'en_ruta_vuelta' : 'en_ruta_ida';
+    const { error } = await window.db.from('viajes').update({ estado: estado }).eq('id', viajeId);
+    if (error) return Swal.fire('No se inició', 'No se pudo cambiar el estado del viaje.', 'error');
+    opNoSleep.enable();
+    Swal.fire('Ruta en curso', regreso ? 'El regreso ha quedado iniciado.' : 'La ruta de ida ha quedado iniciada.', 'success');
+    cargarOperacion();
 }
 
 async function operacionFinalizar() {
     const viajeId = document.getElementById('op-viaje').value;
     if (!viajeId) return;
     const enVuelta = window.operacionEstado === 'en_ruta_vuelta';
+    const resp = await Swal.fire({
+        title: enVuelta ? '¿Finalizar el viaje?' : '¿Confirmar llegada al destino?',
+        text: enVuelta ? 'El viaje quedará concluido.' : 'El estado cambiará a espera de regreso.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: enVuelta ? 'Sí, finalizar viaje' : 'Sí, confirmar llegada',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!resp.isConfirmed) return;
+
     const cambios = enVuelta ? { estado: 'finalizado', inscripcion_abierta: false } : { estado: 'espera_vuelta' };
     const { error } = await window.db.from('viajes').update(cambios).eq('id', viajeId);
     if (error) return Swal.fire('No se guardó', 'No se pudo actualizar el viaje.', 'error');
-    document.getElementById('op-gps').checked = false;
-    operacionGps(false);
     opNoSleep.disable();
-    Swal.fire(enVuelta ? 'Viaje terminado' : 'Destino alcanzado', enVuelta ? 'El viaje quedó finalizado.' : 'El GPS se pausó. Puede iniciar el regreso cuando corresponda.', 'success');
+    Swal.fire(enVuelta ? 'Viaje terminado' : 'Destino alcanzado', enVuelta ? 'El viaje quedó finalizado.' : 'Llegada registrada. Puede iniciar el regreso cuando corresponda.', 'success');
     cargarOperacion();
 }
 
-function operacionGps(activo) {
-    const texto = document.getElementById('op-gps-texto');
-    if (opWatch) {
-        navigator.geolocation.clearWatch(opWatch);
-        opWatch = null;
-    }
-    if (!activo) {
-        if (texto) texto.innerText = 'GPS inactivo';
-        return;
-    }
-    const transporteId = document.getElementById('op-transporte').value;
-    if (!transporteId) {
-        document.getElementById('op-gps').checked = false;
-        Swal.fire('Unidad', 'Elija la unidad que va a transmitir.', 'warning');
-        return;
-    }
-    if (!navigator.geolocation) return;
-    if (texto) texto.innerText = 'Transmitiendo';
-    opNoSleep.enable();
-    opWatch = navigator.geolocation.watchPosition(async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        if (opMap) {
-            if (!opMarker) opMarker = L.circleMarker([lat, lng], { radius: 7, color: '#0c2340', fillColor: '#8d7340', fillOpacity: 1 }).addTo(opMap);
-            else opMarker.setLatLng([lat, lng]);
+// ==========================================
+// CONTROL DE ASISTENCIA (POR TRANSPORTES)
+// ==========================================
+window.asistenciaViajeId = null;
+window.asistenciaViajes = [];
+window.asistenciaTransportes = [];
+window.asistenciaPasajeros = [];
+window.asistenciaFiltroTab = 'todos';
+window.asistenciaBusqueda = '';
+window.asistenciaRuta = [];
+
+async function cargarControlAsistencia(forzar) {
+    const selViaje = document.getElementById('asist-viaje-select');
+    if (!selViaje) return;
+
+    if (forzar || !selViaje.options.length) {
+        const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, fecha_salida, ruta').order('fecha_salida', { ascending: false });
+        window.asistenciaViajes = viajes || [];
+        selViaje.innerHTML = window.asistenciaViajes.map((v) => {
+            const estadoTxt = v.estado === 'finalizado' ? ' (Finalizado)' : (v.estado === 'en_ruta_ida' || v.estado === 'en_ruta_vuelta' ? ' (En curso)' : '');
+            return `<option value="${v.id}">${escaparHtml(v.titulo)}${estadoTxt}</option>`;
+        }).join('');
+        if (window.asistenciaViajes.length && !window.asistenciaViajeId) {
+            const activo = window.asistenciaViajes.find((v) => v.estado !== 'finalizado') || window.asistenciaViajes[0];
+            window.asistenciaViajeId = activo.id;
+            selViaje.value = activo.id;
+        } else if (window.asistenciaViajeId) {
+            selViaje.value = window.asistenciaViajeId;
         }
-        await window.db.from('gps_logs').insert([{ transporte_id: transporteId, latitud: lat, longitud: lng, velocidad: pos.coords.speed || 0 }]);
-    }, () => {
-        if (texto) texto.innerText = 'GPS inactivo';
-        document.getElementById('op-gps').checked = false;
-    }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 });
+    }
+
+    const viajeId = selViaje.value;
+    window.asistenciaViajeId = viajeId;
+    if (!viajeId) {
+        const container = document.getElementById('asist-unidades-container');
+        if (container) container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-light);">Seleccione un viaje para ver el control de asistencia.</div>';
+        return;
+    }
+
+    const viajeActual = (window.asistenciaViajes || []).find((v) => v.id === viajeId);
+    window.asistenciaRuta = viajeActual ? puntosDeRuta(viajeActual.ruta) : [];
+
+    const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeId).order('created_at', { ascending: true });
+    window.asistenciaTransportes = transportes || [];
+
+    const { data: pasajeros } = await window.db.from('usuarios')
+        .select('id, nombre_completo, correo, telefono, asiento, parada_id, abordo, asistencia_cancelada, transporte_id, rol')
+        .eq('viaje_id', viajeId);
+    window.asistenciaPasajeros = pasajeros || [];
+
+    const totalEstudiantes = window.asistenciaPasajeros.length;
+    const totalAbordo = window.asistenciaPasajeros.filter((p) => p.abordo).length;
+    const totalPendientes = totalEstudiantes - totalAbordo;
+    const pctAbordo = totalEstudiantes ? Math.round((totalAbordo / totalEstudiantes) * 100) : 0;
+
+    const resumenBox = document.getElementById('asist-resumen-general');
+    if (resumenBox) {
+        resumenBox.innerHTML = `
+            <div style="background:var(--card-bg, #ffffff); border:1px solid var(--border); border-radius:10px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size:0.8rem; text-transform:uppercase; color:var(--text-light); font-weight:700;">Total Inscritos</div>
+                <div style="font-size:1.8rem; font-weight:800; color:var(--text-color); margin-top:4px;">${totalEstudiantes}</div>
+                <div style="font-size:0.8rem; color:var(--text-light); margin-top:2px;">En ${window.asistenciaTransportes.length} transporte(s)</div>
+            </div>
+            <div style="background:rgba(16,185,129,0.07); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:1rem;">
+                <div style="font-size:0.8rem; text-transform:uppercase; color:#065f46; font-weight:700;">🟢 A Bordo</div>
+                <div style="font-size:1.8rem; font-weight:800; color:#10b981; margin-top:4px;">${totalAbordo} <small style="font-size:0.9rem; font-weight:600; color:#059669;">(${pctAbordo}%)</small></div>
+                <div style="font-size:0.8rem; color:#065f46; margin-top:2px;">Confirmaron estar dentro</div>
+            </div>
+            <div style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.3); border-radius:10px; padding:1rem;">
+                <div style="font-size:0.8rem; text-transform:uppercase; color:#991b1b; font-weight:700;">🔴 Aún no dentro</div>
+                <div style="font-size:1.8rem; font-weight:800; color:#ef4444; margin-top:4px;">${totalPendientes} <small style="font-size:0.9rem; font-weight:600; color:#dc2626;">(${100 - pctAbordo}%)</small></div>
+                <div style="font-size:0.8rem; color:#991b1b; margin-top:2px;">Pendientes por abordar</div>
+            </div>
+        `;
+    }
+
+    const tabsBox = document.getElementById('asist-tabs-unidades');
+    if (tabsBox) {
+        let tabsHtml = `<button type="button" class="btn ${window.asistenciaFiltroTab === 'todos' ? 'btn-primary' : 'btn-outline'} btn-auto" style="border-radius:20px; padding:6px 16px;" onclick="renderVistaAsistencia('todos')">Todos (${totalEstudiantes})</button>`;
+        
+        window.asistenciaTransportes.forEach((t) => {
+            const label = etiquetaTransporte(t, window.asistenciaTransportes);
+            const enUnidad = window.asistenciaPasajeros.filter((p) => p.transporte_id === t.id);
+            const abordoUnidad = enUnidad.filter((p) => p.abordo).length;
+            const activa = window.asistenciaFiltroTab === t.id;
+            tabsHtml += `
+                <button type="button" class="btn ${activa ? 'btn-primary' : 'btn-outline'} btn-auto" style="border-radius:20px; padding:6px 16px;" onclick="renderVistaAsistencia('${t.id}')">
+                    ${escaparHtml(label)} <span style="font-size:0.8rem; opacity:0.85;">(${abordoUnidad}/${enUnidad.length})</span>
+                </button>
+            `;
+        });
+
+        const sinUnidad = window.asistenciaPasajeros.filter((p) => !p.transporte_id);
+        if (sinUnidad.length) {
+            const activa = window.asistenciaFiltroTab === 'sin_unidad';
+            tabsHtml += `
+                <button type="button" class="btn ${activa ? 'btn-primary' : 'btn-outline'} btn-auto" style="border-radius:20px; padding:6px 16px;" onclick="renderVistaAsistencia('sin_unidad')">
+                    Sin transporte (${sinUnidad.length})
+                </button>
+            `;
+        }
+        tabsBox.innerHTML = tabsHtml;
+    }
+
+    renderVistaAsistencia();
 }
+
+function filtrarListaAsistencia() {
+    const input = document.getElementById('asist-buscar');
+    window.asistenciaBusqueda = input ? input.value.toLowerCase().trim() : '';
+    renderVistaAsistencia();
+}
+
+function renderVistaAsistencia(filtroTab) {
+    if (filtroTab !== undefined) {
+        window.asistenciaFiltroTab = filtroTab;
+        const tabsBox = document.getElementById('asist-tabs-unidades');
+        if (tabsBox) {
+            const btns = tabsBox.querySelectorAll('button');
+            btns.forEach((btn) => {
+                const clickAttr = btn.getAttribute('onclick') || '';
+                if (clickAttr.includes(`'${window.asistenciaFiltroTab}'`)) {
+                    btn.classList.remove('btn-outline');
+                    btn.classList.add('btn-primary');
+                } else {
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-outline');
+                }
+            });
+        }
+    }
+
+    const container = document.getElementById('asist-unidades-container');
+    if (!container) return;
+
+    let unidadesAMostrar = [];
+    let mostrarSinUnidad = false;
+
+    if (window.asistenciaFiltroTab === 'todos') {
+        unidadesAMostrar = window.asistenciaTransportes;
+        mostrarSinUnidad = window.asistenciaPasajeros.some((p) => !p.transporte_id);
+    } else if (window.asistenciaFiltroTab === 'sin_unidad') {
+        mostrarSinUnidad = true;
+    } else {
+        unidadesAMostrar = window.asistenciaTransportes.filter((t) => t.id === window.asistenciaFiltroTab);
+    }
+
+    const busq = window.asistenciaBusqueda;
+    const filtrarPasajeros = (lista) => {
+        if (!busq) return lista;
+        return lista.filter((p) => (p.nombre_completo || '').toLowerCase().includes(busq) || (p.correo || '').toLowerCase().includes(busq));
+    };
+
+    let html = '';
+
+    if (!unidadesAMostrar.length && !mostrarSinUnidad) {
+        container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--text-light);">No hay unidades de transporte registradas para este viaje.</div>';
+        return;
+    }
+
+    unidadesAMostrar.forEach((t) => {
+        const nombreUnidad = etiquetaTransporte(t, window.asistenciaTransportes);
+        const tipoDetalle = nombreTipoTransporte(t.tipo);
+        const pasajerosUnidad = window.asistenciaPasajeros.filter((p) => p.transporte_id === t.id);
+        const pasajerosFiltrados = filtrarPasajeros(pasajerosUnidad);
+        const abordo = pasajerosUnidad.filter((p) => p.abordo).length;
+        const faltantes = pasajerosUnidad.length - abordo;
+
+        const icono = t.tipo === 'moto' ? '🏍️' : (t.tipo === 'microbus_16' ? '🚐' : '🚌');
+
+        html += `
+            <div style="background:var(--card-bg, #ffffff); border:1px solid var(--border); border-radius:12px; margin-bottom:1.5rem; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+                <div style="background:var(--bg-main, #f8fafc); padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <h4 style="margin:0; display:flex; align-items:center; gap:8px; font-size:1.15rem; color:var(--text-color);">
+                            <span>${icono}</span> <span>${escaparHtml(nombreUnidad)}</span>
+                            <span style="font-size:0.8rem; font-weight:normal; color:var(--text-light); background:var(--border); padding:2px 8px; border-radius:8px;">${escaparHtml(tipoDetalle)} - Capacidad: ${t.capacidad || '—'}</span>
+                        </h4>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; font-size:0.88rem;">
+                        <span style="background:rgba(16,185,129,0.12); color:#065f46; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:4px 10px; border-radius:12px;">
+                            🟢 ${abordo} a bordo
+                        </span>
+                        <span style="background:rgba(239,68,68,0.12); color:#991b1b; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:4px 10px; border-radius:12px;">
+                            🔴 ${faltantes} aún no dentro
+                        </span>
+                        <span style="font-weight:600; color:var(--text-light);">
+                            Total: ${pasajerosUnidad.length}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="margin:0;">
+                    <table style="margin:0; width:100%;">
+                        <thead>
+                            <tr style="background:transparent;">
+                                <th>Estudiante</th>
+                                <th>Asiento</th>
+                                <th>Parada Asignada</th>
+                                <th style="text-align:center;">Estado</th>
+                                <th style="text-align:center;">Acción Manual</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${!pasajerosFiltrados.length ? `<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-light);">${pasajerosUnidad.length === 0 ? 'Sin pasajeros asignados a esta unidad.' : 'No hay estudiantes que coincidan con la búsqueda.'}</td></tr>` : pasajerosFiltrados.map((p) => {
+                                const parada = leerParada(p.parada_id, window.asistenciaRuta);
+                                const estadoBadge = p.abordo
+                                    ? '<span style="color:#10b981; font-weight:700; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:4px 12px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">🟢 A bordo</span>'
+                                    : (p.asistencia_cancelada
+                                        ? '<span style="color:#ef4444; font-weight:700; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); padding:4px 12px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">🔴 Canceló</span>'
+                                        : '<span style="color:#ef4444; font-weight:700; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); padding:4px 12px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">🔴 Aún no está dentro</span>');
+                                
+                                const btnAccion = p.abordo
+                                    ? `<button type="button" class="btn btn-outline btn-auto" style="color:#ef4444; border-color:#ef4444; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', false)">🔴 Marcar no dentro</button>`
+                                    : `<button type="button" class="btn btn-primary btn-auto" style="background:#10b981; border-color:#10b981; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', true)">🟢 Marcar a bordo</button>`;
+
+                                return `
+                                    <tr style="${p.abordo ? 'background:rgba(16,185,129,0.02);' : ''}">
+                                        <td>
+                                            <div style="font-weight:600; color:var(--text-color);">${escaparHtml(p.nombre_completo)}</div>
+                                            <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.correo || '')}</div>
+                                        </td>
+                                        <td><span class="badge" style="background:var(--border); color:var(--text-color);">${escaparHtml(p.asiento || '—')}</span></td>
+                                        <td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td>
+                                        <td style="text-align:center;">${estadoBadge}</td>
+                                        <td style="text-align:center;">${btnAccion}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    });
+
+    if (mostrarSinUnidad) {
+        const sinUnidad = window.asistenciaPasajeros.filter((p) => !p.transporte_id);
+        const sinUnidadFiltrados = filtrarPasajeros(sinUnidad);
+        if (sinUnidad.length) {
+            html += `
+                <div style="background:var(--card-bg, #ffffff); border:1px solid var(--border); border-radius:12px; margin-bottom:1.5rem; overflow:hidden;">
+                    <div style="background:#fffbeb; padding:1rem 1.25rem; border-bottom:1px solid #fde68a; display:flex; justify-content:space-between; align-items:center;">
+                        <h4 style="margin:0; color:#b45309; display:flex; align-items:center; gap:8px;">
+                            <span>⚠️</span> <span>Inscritos sin Unidad Asignada</span>
+                        </h4>
+                        <span style="font-weight:700; color:#b45309;">Total: ${sinUnidad.length}</span>
+                    </div>
+                    <div class="table-responsive" style="margin:0;">
+                        <table style="margin:0; width:100%;">
+                            <thead>
+                                <tr>
+                                    <th>Estudiante</th>
+                                    <th>Asiento</th>
+                                    <th>Parada Asignada</th>
+                                    <th style="text-align:center;">Estado</th>
+                                    <th style="text-align:center;">Acción Manual</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sinUnidadFiltrados.map((p) => {
+                                    const parada = leerParada(p.parada_id, window.asistenciaRuta);
+                                    const estadoBadge = p.abordo
+                                        ? '<span style="color:#10b981; font-weight:700; background:rgba(16,185,129,0.12); padding:4px 12px; border-radius:12px;">🟢 A bordo</span>'
+                                        : '<span style="color:#ef4444; font-weight:700; background:rgba(239,68,68,0.12); padding:4px 12px; border-radius:12px;">🔴 Aún no está dentro</span>';
+                                    const btnAccion = p.abordo
+                                        ? `<button type="button" class="btn btn-outline btn-auto" style="color:#ef4444; border-color:#ef4444; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', false)">🔴 Marcar no dentro</button>`
+                                        : `<button type="button" class="btn btn-primary btn-auto" style="background:#10b981; border-color:#10b981; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', true)">🟢 Marcar a bordo</button>`;
+                                    return `
+                                        <tr>
+                                            <td>
+                                                <div style="font-weight:600;">${escaparHtml(p.nombre_completo)}</div>
+                                                <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.correo || '')}</div>
+                                            </td>
+                                            <td>—</td>
+                                            <td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td>
+                                            <td style="text-align:center;">${estadoBadge}</td>
+                                            <td style="text-align:center;">${btnAccion}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    container.innerHTML = html;
+}
+
+async function cambiarAbordoSuper(usuarioId, nuevoEstado) {
+    const { error } = await window.db.from('usuarios').update({ abordo: nuevoEstado, asistencia_cancelada: false }).eq('id', usuarioId);
+    if (error) {
+        Swal.fire('Error', 'No se pudo actualizar el estado de asistencia.', 'error');
+        return;
+    }
+    const p = (window.asistenciaPasajeros || []).find((u) => u.id === usuarioId);
+    if (p) {
+        p.abordo = nuevoEstado;
+        p.asistencia_cancelada = false;
+    }
+    if (typeof cargarOperacionUnidad === 'function') cargarOperacionUnidad();
+    cargarControlAsistencia(false);
+
+    Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: nuevoEstado ? '🟢 Marcado a bordo' : '🔴 Marcado fuera de la unidad',
+        showConfirmButton: false,
+        timer: 1600
+    });
+}
+
+window.cargarControlAsistencia = cargarControlAsistencia;
+window.renderVistaAsistencia = renderVistaAsistencia;
+window.cambiarAbordoSuper = cambiarAbordoSuper;
+window.filtrarListaAsistencia = filtrarListaAsistencia;
 
 // Inicializar
 loadDashboard();

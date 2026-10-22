@@ -58,18 +58,17 @@ async function loadEstudianteDashboard(skipFetch = false) {
 
             if (!viajes || viajes.length === 0) {
                 container.innerHTML = `<div class="card" style="grid-column: 1 / -1;"><h3 style="color:var(--text-muted);">No hay viajes abiertos en este momento.</h3></div>`;
-                return;
+            } else {
+                viajes.forEach(v => {
+                    container.innerHTML += `
+                        <div class="card text-center" style="border-top: 4px solid var(--accent);">
+                            <h3 style="word-break: break-word;">${v.titulo}</h3>
+                            <p class="text-muted" style="margin-bottom:15px;">Salida: ${new Date(v.fecha_salida).toLocaleString()}</p>
+                            <button class="btn btn-success w-100" onclick="anotarseViaje('${v.id}')">Anotarme a este viaje</button>
+                        </div>
+                    `;
+                });
             }
-
-            viajes.forEach(v => {
-                container.innerHTML += `
-                    <div class="card text-center" style="border-top: 4px solid var(--accent);">
-                        <h3 style="word-break: break-word;">${v.titulo}</h3>
-                        <p class="text-muted" style="margin-bottom:15px;">Salida: ${new Date(v.fecha_salida).toLocaleString()}</p>
-                        <button class="btn btn-success w-100" onclick="anotarseViaje('${v.id}')">Anotarme a este viaje</button>
-                    </div>
-                `;
-            });
 
         } else {
             // == VISTA DE VIAJE ACTIVO ==
@@ -92,27 +91,33 @@ async function loadEstudianteDashboard(skipFetch = false) {
             const panelAsistencia = document.getElementById('panel-asistencia');
             const btnAsis = document.getElementById('btn-asistencia');
             const btnCancAsis = document.getElementById('btn-cancelar-asistencia');
+            const asisBadge = document.getElementById('asistencia-badge');
 
-            if (estado === 'asiento_elegido') {
-                panelAsistencia.style.display = 'block';
+            if (session.transporte_id && (estado === 'asiento_elegido' || estado === 'asignado')) {
+                if (panelAsistencia) panelAsistencia.style.display = 'block';
                 if (session.abordo) {
-                    btnAsis.style.display = 'none';
-                    btnCancAsis.style.display = 'block';
-                    document.getElementById('badge-estado').innerText = "Estás a bordo";
+                    if (btnAsis) btnAsis.style.display = 'none';
+                    if (btnCancAsis) btnCancAsis.style.display = 'inline-block';
+                    if (asisBadge) {
+                        asisBadge.innerText = "🟢 Estás a bordo";
+                        asisBadge.style.background = "var(--success)";
+                        asisBadge.style.color = "white";
+                    }
+                    document.getElementById('badge-estado').innerText = "🟢 A bordo";
                     document.getElementById('badge-estado').style.background = "var(--success)";
-                } else if (session.asistencia_cancelada) {
-                    btnAsis.style.display = 'block';
-                    btnCancAsis.style.display = 'none';
-                    document.getElementById('badge-estado').innerText = "Asistencia Cancelada";
-                    document.getElementById('badge-estado').style.background = "var(--error)";
                 } else {
-                    btnAsis.style.display = 'block';
-                    btnCancAsis.style.display = 'none';
-                    document.getElementById('badge-estado').innerText = "Asiento Confirmado";
-                    document.getElementById('badge-estado').style.background = "var(--primary)";
+                    if (btnAsis) btnAsis.style.display = 'inline-block';
+                    if (btnCancAsis) btnCancAsis.style.display = 'none';
+                    if (asisBadge) {
+                        asisBadge.innerText = "🔴 Aún no estás dentro";
+                        asisBadge.style.background = "var(--error)";
+                        asisBadge.style.color = "white";
+                    }
+                    document.getElementById('badge-estado').innerText = "🔴 Aún no dentro";
+                    document.getElementById('badge-estado').style.background = "var(--error)";
                 }
             } else {
-                panelAsistencia.style.display = 'none';
+                if (panelAsistencia) panelAsistencia.style.display = 'none';
             }
 
             // Datos del Transporte Asignado
@@ -294,14 +299,6 @@ async function loadEstudianteDashboard(skipFetch = false) {
             }
         }
 
-        const modoTxt = document.getElementById('gps-modo-texto');
-        const modo = modoGpsDe(viaje);
-        if (modoTxt) {
-            modoTxt.innerText = modo === 'caravana'
-                ? 'Modo caravana: se muestra la última ubicación recibida de cualquier unidad de este viaje.'
-                : 'Modo por transporte: se muestra la ubicación de su unidad.';
-        }
-        iniciarSeguimiento(viaje);
         consultarSolicitudParada();
 
         } // Fin else (estado !== ninguno)
@@ -347,14 +344,30 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, () => {
                     loadEstudianteDashboard();
                 })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_logs' }, (payload) => {
-                    aplicarLecturaGps(payload.new);
-                })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'paradas_intermitentes' }, (payload) => {
                     const fila = payload.new || payload.old;
                     if (fila && fila.usuario_id === session.id) consultarSolicitudParada();
                 })
                 .subscribe();
+
+            if (!window.subAsientosRegistradaEstudiante) {
+                window.subAsientosRegistradaEstudiante = true;
+                suscribirAsientosEnVivo(() => {
+                    if (window.currentViajeId && session.transporte_id) {
+                        lastOccupiedStr = "";
+                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                        cargarMiembros(session.transporte_id);
+                        cargarMiembrosGenerales(window.currentViajeId);
+                    }
+                });
+
+                if (window.croquisInterval) clearInterval(window.croquisInterval);
+                window.croquisInterval = setInterval(() => {
+                    if (window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
+                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                    }
+                }, 2500);
+            }
         }
 
     } catch (e) {
@@ -440,6 +453,7 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     const asientosOcupados = asientosOcupadosInfo;
     
     const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.nombre_completo).sort() : [];
+    occupiedIds.push('MINE:' + (session.asiento || 'none'));
     const occupiedStr = JSON.stringify(occupiedIds);
 
     if (croquisDiv.innerHTML !== '' && lastOccupiedStr === occupiedStr) return; // Evitar parpadeos si no hay cambios
@@ -500,6 +514,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     session.estado_viaje = 'asignado';
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('Asiento liberado', 'Puede elegir otro dentro del horario.', 'success');
+                    notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                     loadEstudianteDashboard(true);
                 } catch(e) {}
             }
@@ -555,6 +570,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     Swal.fire('¡Éxito!', 'Asiento cambiado.', 'success');
                     lastOccupiedStr = ""; // Forzar recargo
                     renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                    notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                 } catch(e) {
                     Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
                     lastOccupiedStr = ""; 
@@ -606,6 +622,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                 localStorage.setItem('omni_user', JSON.stringify(session));
                 
                 Swal.fire('Asiento reservado', 'Ahora indique la parada de subida.', 'success');
+                notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                 loadEstudianteDashboard(true);
             } catch(e) { 
                 Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error'); 
@@ -731,61 +748,45 @@ async function consultarSolicitudParada() {
     estado.innerText = parada ? 'Parada confirmada: ' + (parada.nombre || 'punto registrado') + '.' : '';
 }
 
-async function iniciarSeguimiento(viaje) {
-    window.modoGps = modoGpsDe(viaje);
-    const { data: trans } = await window.db.from('transportes').select('id').eq('viaje_id', viaje.id);
-    window.transportesViaje = trans || [];
-    let consulta = window.db.from('gps_logs').select('*').limit(40);
-    const { data, error } = await consulta;
-    if (error || !data) return;
-    const ids = new Set(window.transportesViaje.map((t) => t.id));
-    const relevantes = data.filter((g) => ids.has(g.transporte_id));
-    relevantes.sort((a, b) => esLecturaMasNueva(a, b) ? -1 : 1);
-    if (window.modoGps === 'caravana') {
-        if (relevantes[0]) moverBus(relevantes[0].latitud, relevantes[0].longitud, 'Caravana');
-    } else if (session.transporte_id) {
-        const mio = relevantes.find((g) => g.transporte_id === session.transporte_id);
-        if (mio) moverBus(mio.latitud, mio.longitud, 'Su transporte');
-    }
-}
-
-function aplicarLecturaGps(log) {
-    if (!log) return;
-    const ids = new Set((window.transportesViaje || []).map((t) => t.id));
-    if (!ids.has(log.transporte_id)) return;
-    if (window.modoGps === 'caravana' || log.transporte_id === session.transporte_id) {
-        moverBus(log.latitud, log.longitud, window.modoGps === 'caravana' ? 'Caravana' : 'Su transporte');
-    }
-}
-
-function moverBus(lat, lng, etiqueta) {
-    if (!map || typeof lat !== 'number') return;
-    if (!busMarker) busMarker = L.marker([lat, lng]).addTo(map).bindPopup(etiqueta);
-    else {
-        busMarker.setLatLng([lat, lng]);
-        busMarker.setPopupContent(etiqueta);
-    }
-}
-
 loadEstudianteDashboard();
-// ====== ASISTENCIA (GEOFENCING) ======
-async function marcarAsistencia() {
-    if (!navigator.geolocation) return Swal.fire('Error', 'Navegador no soporta GPS', 'error');
-    if (!window.currentViajeData || !window.currentViajeData.ruta || window.currentViajeData.ruta.length === 0) return Swal.fire('Error', 'Datos de la ruta no disponibles', 'error');
 
-    Swal.fire({ title: 'Verificando ubicación...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+// ====== ASISTENCIA DE ESTUDIANTE (SIN GPS) ======
+async function marcarAsistencia(abordo) {
+    if (!session.id) return;
+    const viaje = window.currentViajeData;
+    if (!viaje) return Swal.fire('Viaje', 'No se encontraron datos del viaje activo.', 'warning');
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const ruta = window.currentViajeData.ruta;
-        const punto = leerParada(session.parada_id, ruta);
-        if (!punto) return Swal.fire('Parada no confirmada', 'Debe tener una parada de subida confirmada antes de marcar asistencia.', 'warning');
+    if (abordo) {
+        // Verificar si es el día de la actividad
+        const hoy = new Date();
+        const hoyStr = hoy.toISOString().slice(0, 10);
+        const fechaSalida = viaje.fecha_salida ? new Date(viaje.fecha_salida) : null;
+        const fechaStr = fechaSalida ? fechaSalida.toISOString().slice(0, 10) : '';
+        const esDia = hoyStr === fechaStr || (fechaSalida && hoy >= fechaSalida) || viaje.estado === 'en_ruta_ida' || viaje.estado === 'en_ruta' || viaje.estado === 'en_ruta_vuelta';
 
-        const dist = distanciaMetros(lat, lng, punto.lat, punto.lng);
-        if (dist > 50) {
-            Swal.fire('Lejos de su parada', `Debe estar a 50 metros o menos de ${punto.nombre || 'su parada'}. Está a ${Math.round(dist)} metros.`, 'warning');
-            return;
+        if (!esDia && fechaSalida) {
+            const fechaFormateada = fechaSalida.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const confirm = await Swal.fire({
+                title: 'Confirmar asistencia',
+                html: `<p>El día programado para esta actividad es el <b>${fechaFormateada}</b>.</p><p style="margin-top:8px;">¿Confirmas que ya estás a bordo de la unidad de transporte?</p>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: 'var(--success)',
+                confirmButtonText: 'Sí, ¡ya estoy a bordo!',
+                cancelButtonText: 'Cancelar'
+            });
+            if (!confirm.isConfirmed) return;
+        } else {
+            const confirm = await Swal.fire({
+                title: '¿Estás a bordo?',
+                text: 'Se confirmará tu asistencia dentro de la unidad.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: 'var(--success)',
+                confirmButtonText: 'Sí, ¡ya estoy a bordo!',
+                cancelButtonText: 'Cancelar'
+            });
+            if (!confirm.isConfirmed) return;
         }
 
         try {
@@ -793,37 +794,45 @@ async function marcarAsistencia() {
             session.abordo = true;
             session.asistencia_cancelada = false;
             localStorage.setItem('omni_user', JSON.stringify(session));
-            Swal.fire('Asistencia confirmada', 'Quedó registrado en la parada de subida.', 'success');
+            Swal.fire({
+                icon: 'success',
+                title: '¡Asistencia Confirmada!',
+                text: 'Has quedado registrado como A BORDO de la unidad.',
+                timer: 2000,
+                showConfirmButton: false
+            });
             loadEstudianteDashboard();
-        } catch(e) { console.error(e); Swal.fire('Error', 'Fallo al confirmar asistencia.', 'error'); }
-    }, (err) => {
-        Swal.fire('Error GPS', 'No se pudo obtener tu ubicación para verificar la distancia.', 'error');
-    }, { enableHighAccuracy: true });
+        } catch(e) {
+            console.error(e);
+            Swal.fire('Error', 'No se pudo registrar la asistencia.', 'error');
+        }
+    } else {
+        const confirm = await Swal.fire({
+            title: '¿Aún no estás dentro?',
+            text: 'Se indicará que aún no has abordado el transporte.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            confirmButtonText: 'Sí, aún no estoy dentro',
+            cancelButtonText: 'Cancelar'
+        });
+        if (!confirm.isConfirmed) return;
+
+        try {
+            await window.db.from('usuarios').update({ abordo: false }).eq('id', session.id);
+            session.abordo = false;
+            localStorage.setItem('omni_user', JSON.stringify(session));
+            Swal.fire('Actualizado', 'Se indicó que aún no estás dentro de la unidad.', 'info');
+            loadEstudianteDashboard();
+        } catch(e) {
+            console.error(e);
+            Swal.fire('Error', 'No se pudo actualizar el estado.', 'error');
+        }
+    }
 }
 
 async function cancelarAsistencia() {
-    Swal.fire({
-        title: '¿No asistirás al viaje?',
-        text: "Al confirmar, notificaremos al administrador para que no te espere.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        cancelButtonColor: '#6b7280',
-        confirmButtonText: 'Sí, cancelar asistencia'
-    }).then(async (result) => {
-        if (result.isConfirmed) {
-            try {
-                await window.db.from('usuarios').update({ asistencia_cancelada: true, abordo: false }).eq('id', session.id);
-                session.asistencia_cancelada = true;
-                session.abordo = false;
-                localStorage.setItem('omni_user', JSON.stringify(session));
-                Swal.fire('Cancelado', 'Se ha notificado al administrador.', 'info');
-                loadEstudianteDashboard();
-            } catch(e) {
-                console.error(e);
-            }
-        }
-    });
+    return marcarAsistencia(false);
 }
 
 // ====== PARADAS DURANTE EL VIAJE ======
