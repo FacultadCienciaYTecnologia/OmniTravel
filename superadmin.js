@@ -508,38 +508,6 @@ async function editarRecorrido(id) {
     
     let puntos = puntosDeRuta(viaje.ruta);
 
-    // Integrar automáticamente paradas aprobadas de estudiantes que aún no estén en la ruta
-    try {
-        const { data: solsAprobadas } = await window.db
-            .from('paradas_intermitentes')
-            .select('*')
-            .eq('viaje_id', id);
-
-        if (solsAprobadas && solsAprobadas.length > 0) {
-            let huboNuevas = false;
-            solsAprobadas.forEach((s) => {
-                const inf = clasificarSolicitud(s);
-                if (inf.estado === 'aprobada' && isFinite(Number(s.lat)) && isFinite(Number(s.lng))) {
-                    const prevLen = puntos.length;
-                    puntos = insertarPuntoEnRuta(puntos, {
-                        lat: Number(s.lat),
-                        lng: Number(s.lng),
-                        nombre: inf.nombre || 'Parada aceptada'
-                    });
-                    if (puntos.length > prevLen) huboNuevas = true;
-                }
-            });
-            if (huboNuevas) {
-                const rutaSincronizada = conModoGps(puntos, modoGpsDe(viaje));
-                await window.db.from('viajes').update({ ruta: rutaSincronizada }).eq('id', id);
-                viaje.ruta = rutaSincronizada;
-                window.viajeEnEdicion = viaje;
-            }
-        }
-    } catch (e) {
-        console.warn('Error sincronizando paradas de estudiantes:', e);
-    }
-
     window.metaParadas = puntos.map((p, i) => ({
         lat: p.lat,
         lng: p.lng,
@@ -657,6 +625,31 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
             }]);
         
         if (error) throw error;
+
+        // Si se editó la ruta, sincronizar paradas_intermitentes para revertir las que fueron quitadas del mapa
+        if (editando && editando.id) {
+            try {
+                const { data: solsAprobadas } = await window.db
+                    .from('paradas_intermitentes')
+                    .select('id, lat, lng, usuario_id')
+                    .eq('viaje_id', editando.id)
+                    .eq('estado', 'aprobada');
+
+                if (solsAprobadas && solsAprobadas.length > 0) {
+                    for (const sol of solsAprobadas) {
+                        const estaEnRuta = (ruta || []).some(w => distanciaMetros(Number(w.lat), Number(w.lng), Number(sol.lat), Number(sol.lng)) <= 80);
+                        if (!estaEnRuta) {
+                            await window.db.from('paradas_intermitentes').update({ estado: 'rechazada' }).eq('id', sol.id);
+                            if (sol.usuario_id) {
+                                await window.db.from('usuarios').update({ parada_id: null }).eq('id', sol.usuario_id);
+                            }
+                        }
+                    }
+                }
+            } catch (syncErr) {
+                console.warn('Error sincronizando solicitudes al guardar ruta:', syncErr);
+            }
+        }
         
         Swal.fire('Guardado', editando ? 'El recorrido quedó actualizado.' : 'Viaje programado correctamente.', 'success');
         cancelarEdicionViaje();
@@ -1616,16 +1609,20 @@ async function cargarSolicitudesSuper() {
         const lngN = Number(p.lng);
         const coord = isFinite(latN) && isFinite(lngN) ? latN.toFixed(5) + ', ' + lngN.toFixed(5) : 'Sin coordenadas';
         const badgeColor = info.estado === 'pendiente' ? 'pending' : (info.estado === 'aprobada' ? 'approved' : '');
-        const acciones = `<button type="button" class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudSuper('${p.id}')" style="display:inline-flex; align-items:center; gap:4px;">
-            🔍 ${info.estado === 'pendiente' ? 'Revisar en Mapa' : 'Ver en Mapa'}
+        let acciones = `<button type="button" class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudSuper('${p.id}')" style="display:inline-flex; align-items:center; gap:4px; padding:4px 8px; font-size:0.82rem;">
+            🔍 ${info.estado === 'pendiente' ? 'Revisar' : 'Ver'}
         </button>`;
+        if (info.estado === 'aprobada') {
+            acciones += ` <button type="button" class="btn btn-outline btn-auto" style="border-color:#ef4444; color:#dc2626; padding:4px 8px; font-size:0.82rem;" onclick="revertirParadaAprobada('${p.id}')" title="Revertir y quitar del recorrido">✕ Revertir</button>`;
+        }
+        acciones += ` <button type="button" class="btn btn-outline btn-auto" style="border-color:#94a3b8; color:#64748b; padding:4px 8px; font-size:0.82rem;" onclick="eliminarSolicitudParada('${p.id}')" title="Eliminar solicitud permanentemente">🗑️</button>`;
         return `<tr>
             <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
             <td>${escaparHtml(titulos[p.viaje_id] || 'Viaje')}</td>
             <td>${info.tipo === 'abordaje' ? 'Subida (Abordaje)' : 'Durante el viaje'}</td>
             <td><b>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</b><br><span class="text-muted" style="font-size:0.8rem;">${coord}</span></td>
             <td><span class="badge ${badgeColor}">${escaparHtml(info.estado)}</span></td>
-            <td>${acciones}</td>
+            <td><div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">${acciones}</div></td>
         </tr>`;
     }).join('');
     if (document.getElementById('paradas') && document.getElementById('paradas').classList.contains('active')) {
@@ -1762,10 +1759,10 @@ async function evaluarSolicitudSuper(id) {
         `,
         width: 780,
         showCancelButton: true,
-        showDenyButton: isPendiente,
+        showDenyButton: isPendiente || info.estado === 'aprobada',
         confirmButtonText: isPendiente ? '✓ Aprobar Parada' : 'Aceptar',
         confirmButtonColor: '#16a34a',
-        denyButtonText: '✕ Rechazar Parada',
+        denyButtonText: isPendiente ? '✕ Rechazar Parada' : '✕ Revertir / Quitar del Recorrido',
         denyButtonColor: '#dc2626',
         cancelButtonText: isPendiente ? 'Dejar Pendiente' : 'Cerrar',
         cancelButtonColor: '#64748b',
@@ -1850,13 +1847,91 @@ async function evaluarSolicitudSuper(id) {
             Swal.fire({ icon: 'success', title: 'Parada Aprobada', text: `Se ha confirmado la parada "${info.nombre || ''}" para ${nombreEstudiante}.`, timer: 2000, showConfirmButton: false });
             cargarSolicitudesSuper();
             if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
-        } else if (result.isDenied && isPendiente) {
-            await resolverSolicitudGuardada(p, 'rechazada');
-            Swal.fire({ icon: 'info', title: 'Parada Rechazada', text: `La solicitud fue rechazada.`, timer: 2000, showConfirmButton: false });
-            cargarSolicitudesSuper();
-            if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+        } else if (result.isDenied) {
+            if (isPendiente) {
+                await resolverSolicitudGuardada(p, 'rechazada');
+                Swal.fire({ icon: 'info', title: 'Parada Rechazada', text: `La solicitud fue rechazada.`, timer: 2000, showConfirmButton: false });
+                cargarSolicitudesSuper();
+                if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+            } else if (info.estado === 'aprobada') {
+                await revertirParadaAprobada(p.id);
+            }
         }
     });
+}
+
+async function revertirParadaAprobada(id) {
+    const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).single();
+    if (!p) return;
+    const conf = await Swal.fire({
+        title: '¿Revertir parada aprobada?',
+        text: 'La parada volverá a estado Rechazada y se quitará automáticamente del recorrido del viaje.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, revertir parada',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        await window.db.from('paradas_intermitentes').update({ estado: 'rechazada' }).eq('id', id);
+        if (p.usuario_id) {
+            await window.db.from('usuarios').update({ parada_id: null }).eq('id', p.usuario_id);
+        }
+        if (p.viaje_id) {
+            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
+            if (viaje && Array.isArray(viaje.ruta)) {
+                const rutaLimpia = viaje.ruta.filter(pt => {
+                    if (!pt || typeof pt.lat !== 'number') return true;
+                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
+                });
+                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
+            }
+        }
+        Swal.fire('Parada Revertida', 'La parada ha quedado rechazada y se retiró del recorrido.', 'success');
+        cargarSolicitudesSuper();
+        if (typeof loadDashboard === 'function') loadDashboard();
+        if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo revertir la parada.', 'error');
+    }
+}
+
+async function eliminarSolicitudParada(id) {
+    const conf = await Swal.fire({
+        title: '¿Eliminar solicitud?',
+        text: 'Se eliminará permanentemente este registro de solicitud de parada.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).maybeSingle();
+        if (p && p.estado === 'aprobada' && p.viaje_id) {
+            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
+            if (viaje && Array.isArray(viaje.ruta)) {
+                const rutaLimpia = viaje.ruta.filter(pt => {
+                    if (!pt || typeof pt.lat !== 'number') return true;
+                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
+                });
+                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
+            }
+        }
+        await window.db.from('paradas_intermitentes').delete().eq('id', id);
+        Swal.fire('Eliminada', 'La solicitud ha sido eliminada.', 'success');
+        cargarSolicitudesSuper();
+        if (typeof loadDashboard === 'function') loadDashboard();
+        if (document.getElementById('operacion') && document.getElementById('operacion').classList.contains('active')) cargarParadasOperacion();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo eliminar la solicitud.', 'error');
+    }
 }
 
 async function superResolverParada(id, decision) {
@@ -1984,6 +2059,9 @@ async function verRutaActiva(viajeId, soloMarcadores) {
             const latN = Number(s.lat);
             const lngN = Number(s.lng);
             if (!isFinite(latN) || !isFinite(lngN)) return;
+            // Solo pintar en el mapa general si la parada sigue estando presente en el recorrido oficial
+            const sigueEnRuta = puntos.some(p => distanciaMetros(p.lat, p.lng, latN, lngN) <= 80);
+            if (!sigueEnRuta) return;
             const info = clasificarSolicitud(s);
             const m = L.circleMarker([latN, lngN], {
                 radius: 7.5,
@@ -2073,9 +2151,11 @@ async function cargarEvidencias() {
     cont.innerHTML = `<div class="table-responsive"><table><thead><tr><th>Foto</th><th>Estudiante</th><th>Viaje</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${
         filas.map((e) => {
             const obs = e.observacion ? `<br><span class="text-muted">${escaparHtml(e.observacion)}</span>` : '';
-            const acciones = e.estado === 'aprobada'
-                ? '<span class="text-muted">Validada</span>'
-                : `<button type="button" class="btn btn-auto" onclick="verEvidencia('${e.id}')">Ver</button> <button type="button" class="btn btn-success btn-auto" onclick="resolverEvidencia('${e.id}', 'aprobada')">Aprobar</button> <button type="button" class="btn btn-danger btn-auto" onclick="resolverEvidencia('${e.id}', 'rechazada')">Rechazar</button>`;
+            const btnVer = `<button type="button" class="btn btn-outline btn-auto" style="padding:4px 8px; font-size:0.82rem;" onclick="verEvidencia('${e.id}')">🔍 Ver</button>`;
+            const btnAprobar = e.estado !== 'aprobada' ? `<button type="button" class="btn btn-success btn-auto" style="padding:4px 8px; font-size:0.82rem;" onclick="resolverEvidencia('${e.id}', 'aprobada')">✓ Aprobar</button>` : '<span style="color:#10b981; font-weight:600; font-size:0.85rem;">✓ Validada</span>';
+            const btnRechazar = e.estado !== 'rechazada' ? `<button type="button" class="btn btn-warning btn-auto" style="padding:4px 8px; font-size:0.82rem;" onclick="resolverEvidencia('${e.id}', 'rechazada')">✕ Rechazar</button>` : '<span style="color:#ef4444; font-weight:600; font-size:0.85rem;">✕ Rechazada</span>';
+            const btnEliminar = `<button type="button" class="btn btn-danger btn-auto" style="padding:4px 8px; font-size:0.82rem;" onclick="eliminarEvidencia('${e.id}')" title="Eliminar evidencia de la base de datos">🗑️ Eliminar</button>`;
+            const acciones = `<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${btnVer} ${btnAprobar} ${btnRechazar} ${btnEliminar}</div>`;
             return `<tr><td><img class="miniatura-evidencia" src="${e.imagen}" alt="Evidencia" onclick="verEvidencia('${e.id}')"></td><td>${escaparHtml(nombreDe(e.usuario_id))}</td><td>${escaparHtml(viajeDe(e.viaje_id))}${obs}</td><td>${etiquetaEstadoEvidencia(e.estado)}</td><td>${acciones}</td></tr>`;
         }).join('')
     }</tbody></table></div>`;
@@ -2089,8 +2169,62 @@ function verEvidencia(id) {
         imageUrl: ev.imagen,
         imageAlt: 'Fotografía enviada por el estudiante',
         text: etiquetaEstadoEvidencia(ev.estado) + (ev.observacion ? '. ' + ev.observacion : ''),
+        showCancelButton: true,
+        cancelButtonText: 'Cerrar',
+        confirmButtonText: '🗑️ Eliminar Evidencia',
+        confirmButtonColor: '#ef4444',
         width: 720
+    }).then((res) => {
+        if (res.isConfirmed) {
+            eliminarEvidencia(id);
+        }
     });
+}
+
+async function eliminarEvidencia(id) {
+    const conf = await Swal.fire({
+        title: '¿Eliminar evidencia?',
+        text: 'Esta fotografía será eliminada permanentemente de la base de datos.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        const { error } = await window.db.from('evidencias').delete().eq('id', id);
+        if (error) throw error;
+        Swal.fire('Eliminada', 'La evidencia fue eliminada con éxito.', 'success');
+        cargarEvidencias();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo eliminar la evidencia: ' + (e.message || ''), 'error');
+    }
+}
+
+async function limpiarTodasEvidencias() {
+    const conf = await Swal.fire({
+        title: '¿Eliminar TODAS las evidencias?',
+        text: 'Esta acción borrará todas las fotografías de prueba almacenadas en la base de datos.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, borrar todas',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        const { error } = await window.db.from('evidencias').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) throw error;
+        Swal.fire('Base limpia', 'Todas las evidencias de prueba fueron eliminadas con éxito.', 'success');
+        cargarEvidencias();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudieron limpiar las evidencias: ' + (e.message || ''), 'error');
+    }
 }
 
 async function resolverEvidencia(id, estado) {
@@ -2179,6 +2313,7 @@ function pintarEstadoOperacion(estado) {
     const etiqueta = document.getElementById('op-estado');
     const iniciar = document.getElementById('op-btn-iniciar');
     const finalizar = document.getElementById('op-btn-finalizar');
+    const reiniciar = document.getElementById('op-btn-reiniciar');
     const nombres = { preparacion: 'Preparación', en_ruta: 'Ruta de ida', en_ruta_ida: 'Ruta de ida', espera_vuelta: 'Esperando el regreso', en_ruta_vuelta: 'Ruta de vuelta', finalizado: 'Finalizado' };
     if (etiqueta) etiqueta.innerText = nombres[window.operacionEstado] || window.operacionEstado;
     const enIda = window.operacionEstado === 'en_ruta' || window.operacionEstado === 'en_ruta_ida';
@@ -2190,6 +2325,16 @@ function pintarEstadoOperacion(estado) {
     if (finalizar) {
         finalizar.style.display = (enIda || enVuelta) ? 'inline-block' : 'none';
         finalizar.innerText = enVuelta ? 'Finalizar viaje' : 'Llegamos al destino';
+    }
+    if (reiniciar) {
+        reiniciar.style.display = 'inline-block';
+        if (window.operacionEstado === 'finalizado') {
+            reiniciar.className = 'btn btn-primary btn-auto';
+            reiniciar.innerText = '🔄 Reiniciar ciclo para nuevas pruebas';
+        } else {
+            reiniciar.className = 'btn btn-outline btn-auto';
+            reiniciar.innerText = '🔄 Reiniciar ciclo del viaje';
+        }
     }
 }
 
@@ -2353,6 +2498,51 @@ async function operacionFinalizar() {
     opNoSleep.disable();
     Swal.fire(enVuelta ? 'Viaje terminado' : 'Destino alcanzado', enVuelta ? 'El viaje quedó finalizado.' : 'Llegada registrada. Puede iniciar el regreso cuando corresponda.', 'success');
     cargarOperacion();
+}
+
+async function operacionReiniciarCiclo() {
+    const viajeId = document.getElementById('op-viaje').value;
+    if (!viajeId) return Swal.fire('Viaje', 'Seleccione el viaje que desea reiniciar.', 'warning');
+
+    const conf = await Swal.fire({
+        title: '¿Reiniciar ciclo del viaje?',
+        text: 'El viaje volverá al estado "Preparación" con inscripciones abiertas y se reiniciará el estado "A bordo" de todos los pasajeros para volver a realizar las pruebas.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, reiniciar ciclo',
+        confirmButtonColor: '#6366f1',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        // 1. Reset viaje a preparacion e inscripcion abierta
+        await window.db.from('viajes').update({
+            estado: 'preparacion',
+            inscripcion_abierta: true
+        }).eq('id', viajeId);
+
+        // 2. Reset usuarios a no a bordo
+        await window.db.from('usuarios').update({
+            abordo: false
+        }).eq('viaje_id', viajeId);
+
+        // 3. Limpiar registros de gps_logs de las unidades de este viaje
+        const { data: trans } = await window.db.from('transportes').select('id').eq('viaje_id', viajeId);
+        if (trans && trans.length) {
+            const transIds = trans.map(t => t.id);
+            await window.db.from('gps_logs').delete().in('transporte_id', transIds);
+        }
+
+        opNoSleep.disable();
+        Swal.fire('Ciclo reiniciado', 'El viaje volvió a Preparación listo para iniciar ruta nuevamente.', 'success');
+        cargarOperacion();
+        if (typeof loadDashboard === 'function') loadDashboard();
+        if (typeof cargarControlAsistencia === 'function') cargarControlAsistencia(true);
+    } catch(err) {
+        console.error(err);
+        Swal.fire('Error', 'No se pudo reiniciar el viaje: ' + (err.message || ''), 'error');
+    }
 }
 
 // ==========================================

@@ -170,7 +170,18 @@ async function loadAdminDashboard() {
             if (btnFin) btnFin.style.display = 'none';
             if (estRuta) estRuta.innerText = 'En Destino (Espera de Retorno)';
             if (infoUni) infoUni.innerText = 'En el destino. Listo para iniciar el regreso cuando se indique.';
+            const btnRei = document.getElementById('btn-reiniciar-admin');
+            if (btnRei) btnRei.style.display = 'none';
+        } else if (window.viajeEstadoActual === 'finalizado') {
+            if (btnIni) btnIni.style.display = 'none';
+            if (btnFin) btnFin.style.display = 'none';
+            const btnRei = document.getElementById('btn-reiniciar-admin');
+            if (btnRei) btnRei.style.display = 'inline-block';
+            if (estRuta) estRuta.innerText = 'Viaje Concluido (Finalizado)';
+            if (infoUni) infoUni.innerText = 'El viaje ha finalizado con éxito. Puedes reiniciar el ciclo para seguir probando.';
         } else {
+            const btnRei = document.getElementById('btn-reiniciar-admin');
+            if (btnRei) btnRei.style.display = 'none';
             if (btnIni) {
                 btnIni.style.display = 'inline-block';
                 btnIni.innerText = "Iniciar Ruta";
@@ -551,6 +562,35 @@ async function finalizarRuta() {
     } catch(e) { console.error(e); }
 }
 
+async function reiniciarCicloAdmin() {
+    if (!viajeIdActual) return;
+    const conf = await Swal.fire({
+        title: '¿Reiniciar ciclo del viaje?',
+        text: 'El viaje volverá al estado "Preparación" con inscripciones abiertas. Se reiniciará el estado a bordo de los pasajeros.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, reiniciar ciclo',
+        confirmButtonColor: '#6366f1',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        await window.db.from('viajes').update({ estado: 'preparacion', inscripcion_abierta: true }).eq('id', viajeIdActual);
+        await window.db.from('usuarios').update({ abordo: false }).eq('viaje_id', viajeIdActual);
+        if (transporteIdActual) {
+            await window.db.from('gps_logs').delete().eq('transporte_id', transporteIdActual);
+        }
+        desactivarGPS();
+        if (gpsToggle) gpsToggle.checked = false;
+        Swal.fire('Ciclo reiniciado', 'El viaje volvió a Preparación listo para nuevas pruebas.', 'success');
+        setTimeout(() => loadAdminDashboard(), 500);
+    } catch(e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo reiniciar el viaje: ' + (e.message || ''), 'error');
+    }
+}
+
 async function cargarSolicitudesParada() {
     const tbody = document.getElementById('paradas-tbody');
     const panel = document.getElementById('panel-paradas');
@@ -574,13 +614,17 @@ async function cargarSolicitudesParada() {
     sols.forEach((p) => {
         const info = clasificarSolicitud(p);
         const tipo = info.tipo === 'abordaje' ? 'Subida' : 'Durante el viaje';
-        const acciones = `<button class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" onclick="evaluarSolicitudAdmin('${p.id}')">🔍 ${info.estado === 'pendiente' ? 'Revisar en Mapa' : 'Ver en Mapa'}</button>`;
+        let acciones = `<button class="btn ${info.estado === 'pendiente' ? 'btn-primary' : 'btn-outline'} btn-auto" style="padding:4px 8px; font-size:0.82rem;" onclick="evaluarSolicitudAdmin('${p.id}')">🔍 ${info.estado === 'pendiente' ? 'Revisar' : 'Ver'}</button>`;
+        if (info.estado === 'aprobada') {
+            acciones += ` <button class="btn btn-outline btn-auto" style="border-color:#ef4444; color:#dc2626; padding:4px 8px; font-size:0.82rem;" onclick="revertirParadaAdmin('${p.id}')" title="Revertir parada">✕ Revertir</button>`;
+        }
+        acciones += ` <button class="btn btn-outline btn-auto" style="border-color:#94a3b8; color:#64748b; padding:4px 8px; font-size:0.82rem;" onclick="eliminarSolicitudAdmin('${p.id}')" title="Eliminar solicitud">🗑️</button>`;
         tbody.innerHTML += `<tr>
             <td>${escaparHtml(nombres[p.usuario_id] || 'Estudiante')}</td>
             <td>${tipo}</td>
             <td>${escaparHtml(info.nombre || 'Punto sobre la ruta')}</td>
             <td>${escaparHtml(info.estado)}</td>
-            <td>${acciones}</td>
+            <td><div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">${acciones}</div></td>
         </tr>`;
     });
 }
@@ -676,10 +720,10 @@ async function evaluarSolicitudAdmin(id) {
         `,
         width: 720,
         showCancelButton: true,
-        showDenyButton: isPendiente,
+        showDenyButton: isPendiente || info.estado === 'aprobada',
         confirmButtonText: isPendiente ? '✓ Aprobar Parada' : 'Aceptar',
         confirmButtonColor: '#16a34a',
-        denyButtonText: '✕ Rechazar Parada',
+        denyButtonText: isPendiente ? '✕ Rechazar Parada' : '✕ Revertir y Quitar de la Ruta',
         denyButtonColor: '#dc2626',
         cancelButtonText: isPendiente ? 'Dejar Pendiente' : 'Cerrar',
         didOpen: () => {
@@ -710,11 +754,87 @@ async function evaluarSolicitudAdmin(id) {
         if (result.isConfirmed && isPendiente) {
             await resolverSolicitud(p, 'aprobada');
             cargarSolicitudesParada();
-        } else if (result.isDenied && isPendiente) {
-            await resolverSolicitud(p, 'rechazada');
-            cargarSolicitudesParada();
+        } else if (result.isDenied) {
+            if (isPendiente) {
+                await resolverSolicitud(p, 'rechazada');
+                cargarSolicitudesParada();
+            } else if (info.estado === 'aprobada') {
+                await revertirParadaAdmin(p.id);
+            }
         }
     });
+}
+
+async function revertirParadaAdmin(id) {
+    const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).single();
+    if (!p) return;
+    const conf = await Swal.fire({
+        title: '¿Revertir parada aprobada?',
+        text: 'La parada quedará rechazada y se quitará automáticamente del recorrido del viaje.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, revertir parada',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        await window.db.from('paradas_intermitentes').update({ estado: 'rechazada' }).eq('id', id);
+        if (p.usuario_id) {
+            await window.db.from('usuarios').update({ parada_id: null }).eq('id', p.usuario_id);
+        }
+        if (p.viaje_id) {
+            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
+            if (viaje && Array.isArray(viaje.ruta)) {
+                const rutaLimpia = viaje.ruta.filter(pt => {
+                    if (!pt || typeof pt.lat !== 'number') return true;
+                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
+                });
+                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
+            }
+        }
+        Swal.fire('Parada Revertida', 'La parada ha quedado rechazada y se retiró del recorrido.', 'success');
+        cargarSolicitudesParada();
+        loadAdminDashboard();
+    } catch(e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo revertir la parada.', 'error');
+    }
+}
+
+async function eliminarSolicitudAdmin(id) {
+    const conf = await Swal.fire({
+        title: '¿Eliminar solicitud?',
+        text: 'Se eliminará permanentemente este registro de solicitud de parada.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        confirmButtonColor: '#ef4444',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!conf.isConfirmed) return;
+
+    try {
+        const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).maybeSingle();
+        if (p && p.estado === 'aprobada' && p.viaje_id) {
+            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
+            if (viaje && Array.isArray(viaje.ruta)) {
+                const rutaLimpia = viaje.ruta.filter(pt => {
+                    if (!pt || typeof pt.lat !== 'number') return true;
+                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
+                });
+                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
+            }
+        }
+        await window.db.from('paradas_intermitentes').delete().eq('id', id);
+        Swal.fire('Eliminada', 'La solicitud ha sido eliminada.', 'success');
+        cargarSolicitudesParada();
+        loadAdminDashboard();
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Error', 'No se pudo eliminar la solicitud.', 'error');
+    }
 }
 
 async function resolverSolicitudPorId(id, estado) {
