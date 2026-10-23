@@ -264,7 +264,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             window.rutaGeometria = normalizarPuntos(puntosRuta);
 
             polylineRuta = trazarRutaConCalles(map, puntosRuta, {
-                color: 'var(--accent)',
+                color: '#0e4c81',
                 weight: 5,
                 opacity: 0.9,
                 onRutaCalculada: (info) => {

@@ -106,8 +106,8 @@ function clasificarSolicitud(row) {
 }
 
 function esLecturaMasNueva(a, b) {
-    const ta = Date.parse((a && (a.creado_en || a.created_at)) || '') || 0;
-    const tb = Date.parse((b && (b.creado_en || b.created_at)) || '') || 0;
+    const ta = Date.parse((a && (a.actualizado_en || a.creado_en || a.created_at)) || '') || 0;
+    const tb = Date.parse((b && (b.actualizado_en || b.creado_en || b.created_at)) || '') || 0;
     if (ta !== tb) return ta > tb;
     return String((a && a.id) || '') > String((b && b.id) || '');
 }

@@ -2001,7 +2001,7 @@ async function verRutaActiva(viajeId, soloMarcadores) {
         const { data: trans } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeId);
         if (trans && trans.length) {
             const transIds = trans.map(t => t.id);
-            const { data: logs } = await window.db.from('gps_logs').select('*').in('transporte_id', transIds).order('creado_en', { ascending: false }).limit(30);
+            const { data: logs } = await window.db.from('gps_logs').select('*').in('transporte_id', transIds).order('actualizado_en', { ascending: false }).limit(30);
             if (logs && logs.length) {
                 const porTransporte = {};
                 logs.forEach(g => {

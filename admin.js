@@ -384,7 +384,6 @@ async function marcarAbordo(btn, id, estaAbordo) {
 }
 
 // ====== LÓGICA DE VIAJE Y TRANSMISIÓN GPS ======
-let watchId = null;
 let markerUbicacionChofer = null;
 let noSleepInstance = null;
 try { if (typeof NoSleep !== 'undefined') noSleepInstance = new NoSleep(); } catch(e) {}
