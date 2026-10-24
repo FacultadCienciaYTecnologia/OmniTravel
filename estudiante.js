@@ -380,19 +380,16 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 window.subAsientosRegistradaEstudiante = true;
                 suscribirAsientosEnVivo(() => {
                     if (window.currentViajeId && session.transporte_id) {
-                        lastOccupiedStr = "";
-                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
-                        cargarMiembros(session.transporte_id);
-                        cargarMiembrosGenerales(window.currentViajeId);
+                        debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
                 });
 
                 if (window.croquisInterval) clearInterval(window.croquisInterval);
                 window.croquisInterval = setInterval(() => {
                     if (window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
-                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                        debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
-                }, 2500);
+                }, 3500);
             }
         }
 
@@ -468,8 +465,20 @@ async function cargarMiembrosGenerales(viajeId) {
 let croquisInterval = null;
 let lastOccupiedStr = "";
 
+let debouncedCroquisTimer = null;
+function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
+    if (debouncedCroquisTimer) clearTimeout(debouncedCroquisTimer);
+    debouncedCroquisTimer = setTimeout(() => {
+        if (forzar) lastOccupiedStr = "";
+        renderCroquisEstudiante(viajeId, transporteId);
+        cargarMiembros(transporteId);
+        cargarMiembrosGenerales(viajeId);
+    }, 250);
+}
+
 async function renderCroquisEstudiante(viajeId, transporteId) {
     const croquisDiv = document.getElementById('croquis');
+    if (!croquisDiv) return;
     
     const { data: t } = await window.db.from('transportes').select('tipo').eq('id', transporteId).single();
     if(!t) return;
@@ -494,7 +503,39 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     if (miAsiento && String(miAsiento).startsWith('Parado')) {
         standingBanner = `<div class="aviso aviso-info" style="margin-bottom:1rem;"><strong>Lugar de pie asignado:</strong> Tienes asignado el lugar <b>${escaparHtml(miAsiento)}</b> en el Transporte 2. Tu registro en el viaje está confirmado.</div>`;
     }
-    croquisDiv.innerHTML = standingBanner + htmlAsientos(plazasPorTipo(t.tipo), (n) => genSeat(n, asientosOcupados, miAsiento));
+
+    const totalPlazas = plazasPorTipo(t.tipo);
+    const seatEls = croquisDiv.querySelectorAll('.seat-v');
+
+    // Actualización ultra rápida en-sitio (in-place) sin parpadeo si los asientos ya están en pantalla
+    if (seatEls.length === totalPlazas) {
+        seatEls.forEach((el) => {
+            const span = el.querySelector('span');
+            const n = span ? parseInt(span.innerText) : null;
+            if (!n) return;
+            const esMio = (miAsiento == n.toString());
+            const ocupante = asientosOcupados[n.toString()];
+            el.className = 'seat-v';
+            if (esMio) {
+                el.classList.add('selected');
+                el.setAttribute('onclick', `selectSeat(this, ${n}, '')`);
+                el.title = 'Tu asiento seleccionado';
+            } else if (ocupante) {
+                el.classList.add(ocupante.rol === 'admin' || ocupante.rol === 'superadmin' ? 'occupied-red' : 'occupied-blue');
+                el.setAttribute('onclick', `selectSeat(this, ${n}, '${escaparHtml(ocupante.nombre_completo)}')`);
+                el.title = `Ocupado por ${ocupante.nombre_completo}`;
+            } else {
+                el.setAttribute('onclick', `selectSeat(this, ${n}, '')`);
+                el.title = `Asiento ${n} libre`;
+            }
+        });
+        const banEl = croquisDiv.querySelector('.aviso');
+        if (!banEl && standingBanner) {
+            croquisDiv.insertAdjacentHTML('afterbegin', standingBanner);
+        }
+    } else {
+        croquisDiv.innerHTML = standingBanner + htmlAsientos(totalPlazas, (n) => genSeat(n, asientosOcupados, miAsiento));
+    }
 }
 
 function genSeat(numero, ocupadosInfo, miAsiento) {

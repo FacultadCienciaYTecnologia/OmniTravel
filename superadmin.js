@@ -85,8 +85,35 @@ function restaurarPestanaActiva() {
 
 // Restaurar de inmediato la pestaña activa
 restaurarPestanaActiva();
-window.activarTab = activarTab;
-window.restaurarPestanaActiva = restaurarPestanaActiva;
+// Debounce centralizado para actualizaciones en vivo de croquis y asignación
+let superadminLiveDebounceTimer = null;
+function debouncedActualizarAsignacionYCroquis(forzarCroquis = false) {
+    if (superadminLiveDebounceTimer) clearTimeout(superadminLiveDebounceTimer);
+    superadminLiveDebounceTimer = setTimeout(() => {
+        if (forzarCroquis) lastAdminOccupiedStr = "";
+        if (typeof renderAdminCroquis === 'function') {
+            renderAdminCroquis(window.croquisOrigen || 'admin');
+            renderAdminCroquis('operacion');
+        }
+
+        const asigTab = document.getElementById('asignacion');
+        if (asigTab && asigTab.classList.contains('active') && typeof pintarAsignacion === 'function') {
+            const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
+            if (!buscando) pintarAsignacion(false);
+        }
+
+        const asistTab = document.getElementById('asistencia');
+        if (asistTab && asistTab.classList.contains('active') && typeof cargarControlAsistencia === 'function') {
+            const buscandoAsis = document.activeElement && document.activeElement.id === 'asist-buscar';
+            if (!buscandoAsis) cargarControlAsistencia(false);
+        }
+
+        const operTab = document.getElementById('operacion');
+        if (operTab && operTab.classList.contains('active') && typeof cargarOperacionUnidad === 'function') {
+            cargarOperacionUnidad();
+        }
+    }, 280);
+}
 
 // ====== CARGA DE DATOS INICIALES ======
 async function loadDashboard() {
@@ -182,27 +209,7 @@ async function loadDashboard() {
                         }
                     });
                     
-                    // Actualizar croquis y asignación en tiempo real si el superadmin lo está viendo
-                    lastAdminOccupiedStr = "";
-                    renderAdminCroquis(window.croquisOrigen || 'admin');
-                    renderAdminCroquis('operacion');
-
-                    const asigTab = document.getElementById('asignacion');
-                    if (asigTab && asigTab.classList.contains('active')) {
-                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
-                        if (!buscando) pintarAsignacion(false);
-                    }
-
-                    const asistTab = document.getElementById('asistencia');
-                    if (asistTab && asistTab.classList.contains('active')) {
-                        const buscandoAsis = document.activeElement && document.activeElement.id === 'asist-buscar';
-                        if (!buscandoAsis) cargarControlAsistencia(true);
-                    }
-
-                    const operTab = document.getElementById('operacion');
-                    if (operTab && operTab.classList.contains('active')) {
-                        cargarOperacionUnidad();
-                    }
+                    debouncedActualizarAsignacionYCroquis(false);
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'viajes' }, (payload) => {
                     loadDashboard(); // Refresca lista de viajes
@@ -221,31 +228,13 @@ async function loadDashboard() {
             if (!window.subAsientosRegistrada) {
                 window.subAsientosRegistrada = true;
                 suscribirAsientosEnVivo(() => {
-                    lastAdminOccupiedStr = "";
-                    renderAdminCroquis(window.croquisOrigen || 'admin');
-                    renderAdminCroquis('operacion');
-                    const tabAsig = document.getElementById('asignacion');
-                    if (tabAsig && tabAsig.classList.contains('active')) {
-                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
-                        if (!buscando) pintarAsignacion(false);
-                    }
+                    debouncedActualizarAsignacionYCroquis(false);
                 });
 
                 if (window.adminCroquisInterval) clearInterval(window.adminCroquisInterval);
                 window.adminCroquisInterval = setInterval(() => {
-                    const divAdmin = document.getElementById('admin-croquis-container');
-                    const divOp = document.getElementById('operacion');
-                    const hayAdmin = divAdmin && divAdmin.style.display !== 'none';
-                    const hayOp = divOp && divOp.classList.contains('active');
-                    if (hayAdmin) renderAdminCroquis('admin');
-                    if (hayOp) renderAdminCroquis('operacion');
-
-                    const tabAsig = document.getElementById('asignacion');
-                    if (tabAsig && tabAsig.classList.contains('active')) {
-                        const buscando = document.activeElement && (document.activeElement.id === 'asig-buscar' || document.activeElement.tagName === 'SELECT');
-                        if (!buscando) pintarAsignacion(false);
-                    }
-                }, 3000);
+                    debouncedActualizarAsignacionYCroquis(false);
+                }, 4000);
             }
         }
 
@@ -2904,7 +2893,7 @@ window.asistenciaBusqueda = '';
 window.asistenciaRuta = [];
 
 async function cargarControlAsistencia(forzar) {
-    const selViaje = document.getElementById('asist-viaje-select');
+    const selViaje = document.getElementById('asist-viaje') || document.getElementById('asist-viaje-select');
     if (!selViaje) return;
 
     if (forzar || !selViaje.options.length) {
@@ -2934,11 +2923,11 @@ async function cargarControlAsistencia(forzar) {
     const viajeActual = (window.asistenciaViajes || []).find((v) => v.id === viajeId);
     window.asistenciaRuta = viajeActual ? puntosDeRuta(viajeActual.ruta) : [];
 
-    const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeId).order('created_at', { ascending: true });
+    const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeId).order('creado_en', { ascending: true });
     window.asistenciaTransportes = transportes || [];
 
     const { data: pasajeros } = await window.db.from('usuarios')
-        .select('id, nombre_completo, correo, telefono, asiento, parada_id, abordo, asistencia_cancelada, transporte_id, rol')
+        .select('id, nombre_completo, email, telefono, dni, asiento, parada_id, abordo, asistencia_cancelada, transporte_id, rol')
         .eq('viaje_id', viajeId);
     window.asistenciaPasajeros = pasajeros || [];
 
@@ -3042,7 +3031,11 @@ function renderVistaAsistencia(filtroTab) {
     const busq = window.asistenciaBusqueda;
     const filtrarPasajeros = (lista) => {
         if (!busq) return lista;
-        return lista.filter((p) => (p.nombre_completo || '').toLowerCase().includes(busq) || (p.correo || '').toLowerCase().includes(busq));
+        return lista.filter((p) => 
+            (p.nombre_completo || '').toLowerCase().includes(busq) || 
+            (p.email || p.correo || '').toLowerCase().includes(busq) ||
+            (p.dni || '').toLowerCase().includes(busq)
+        );
     };
 
     let html = '';
@@ -3116,7 +3109,7 @@ function renderVistaAsistencia(filtroTab) {
                                     <tr style="${p.abordo ? 'background:rgba(16,185,129,0.02);' : ''}">
                                         <td>
                                             <div style="font-weight:600; color:var(--text-color);">${escaparHtml(p.nombre_completo)}</div>
-                                            <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.correo || '')}</div>
+                                            <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.email || p.correo || p.dni || '')}</div>
                                         </td>
                                         <td><span class="badge" style="background:var(--border); color:var(--text-color);">${escaparHtml(p.asiento || '—')}</span></td>
                                         <td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td>
@@ -3168,7 +3161,7 @@ function renderVistaAsistencia(filtroTab) {
                                         <tr>
                                             <td>
                                                 <div style="font-weight:600;">${escaparHtml(p.nombre_completo)}</div>
-                                                <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.correo || '')}</div>
+                                                <div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.email || p.correo || p.dni || '')}</div>
                                             </td>
                                             <td>—</td>
                                             <td>${escaparHtml(parada && parada.nombre ? parada.nombre : '—')}</td>
