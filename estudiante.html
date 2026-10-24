@@ -122,7 +122,25 @@
                 <div id="lista-miembros" style="display: flex; gap:10px; flex-wrap: wrap;"></div>
             </div>
 
-            <div class="card mb-3">
+            <!-- CARD PARA ESTUDIANTES ASIGNADOS DE PIE / PARADOS (SIN ACCESO A CROQUIS) -->
+            <div class="card mb-3" id="card-usuario-parado" style="display:none; border-left: 4px solid #0284c7; background: #f0f9ff;">
+                <div style="display:flex; align-items:flex-start; gap:14px;">
+                    <span style="font-size:2.2rem; line-height:1;">🚶</span>
+                    <div style="flex:1;">
+                        <h3 style="color:#0369a1; margin:0 0 4px; font-size:1.1rem;">Modalidad: Viaje de Pie (<span id="parado-slot-txt" style="color:#0284c7;">Parado</span>)</h3>
+                        <p style="margin:0 0 6px; color:#0c4a6e; font-size:0.92rem;">
+                            Has sido asignado para viajar <b>de pie</b> en esta unidad. 
+                            <b>No requieres ni tienes acceso a reservar un asiento en el croquis</b>, ya que tu lugar de pie está confirmado.
+                        </p>
+                        <p style="margin:0; color:#0369a1; font-weight:700; font-size:0.9rem;">
+                            👇 Procede a continuación a indicar tu <b>parada de subida</b>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD RESERVA DE ASIENTO (CROQUIS) - SOLO PARA PASAJEROS CON ASIENTO REGULAR -->
+            <div class="card mb-3" id="card-croquis-asientos">
                 <div class="seccion-titulo">
                     <h3>1. Reserva de asiento</h3>
                     <p>Elija un asiento libre dentro del horario. Fuera de ese horario el croquis no acepta cambios. El frente del vehículo está a la izquierda.</p>

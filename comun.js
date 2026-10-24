@@ -174,10 +174,18 @@ function iniciarMenuLateral() {
     function cerrar() {
         sidebar.classList.remove('abierto');
         if (overlay) overlay.classList.remove('abierto');
+        if (btn) {
+            btn.innerHTML = 'Menú';
+            btn.style.left = '12px';
+        }
     }
     function alternar() {
         const abierto = sidebar.classList.toggle('abierto');
         if (overlay) overlay.classList.toggle('abierto', abierto);
+        if (btn) {
+            btn.innerHTML = abierto ? '✕' : 'Menú';
+            btn.style.left = abierto ? 'min(240px, 78vw)' : '12px';
+        }
     }
     if (btn) btn.addEventListener('click', alternar);
     if (overlay) overlay.addEventListener('click', cerrar);
@@ -443,4 +451,16 @@ window.trazarRutaConCalles = trazarRutaConCalles;
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarMenuLateral);
 else iniciarMenuLateral();
+
+window.addEventListener('resize', () => {
+    try {
+        if (typeof map !== 'undefined' && map && map.invalidateSize) map.invalidateSize();
+        if (typeof globalMap !== 'undefined' && globalMap && globalMap.invalidateSize) globalMap.invalidateSize();
+        if (typeof routingMap !== 'undefined' && routingMap && routingMap.invalidateSize) routingMap.invalidateSize();
+        if (typeof opMap !== 'undefined' && opMap && opMap.invalidateSize) opMap.invalidateSize();
+        if (typeof paradasMap !== 'undefined' && paradasMap && paradasMap.invalidateSize) paradasMap.invalidateSize();
+        if (typeof mapaParadasAdmin !== 'undefined' && mapaParadasAdmin && mapaParadasAdmin.invalidateSize) mapaParadasAdmin.invalidateSize();
+    } catch (e) {}
+});
+
 

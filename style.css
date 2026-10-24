@@ -710,14 +710,196 @@ th {
     background: #f4f7fa;
 }
 
-@media (max-width: 860px) {
-    .menu-toggle { display: inline-block; }
-    .sidebar { transform: translateX(-105%); transition: transform 0.2s ease; width: min(280px, 86vw); }
-    .sidebar.abierto { transform: none; }
-    .main-content { margin-left: 0; padding: 4.2rem 1rem 2rem; }
-    .container { padding: 1rem; }
-    .grid-2, .grid-3 { grid-template-columns: 1fr; }
-    .trip-item, .navbar, .appbar { flex-direction: column; align-items: flex-start; }
-    .progress-container { grid-template-columns: 1fr 1fr; }
-    .btn-group { width: 100%; }
+/* ==============================================================================
+   DISEÑO 100% RESPONSIVO PARA TODAS LAS PANTALLAS (MÓVIL, TABLET, ESCRITORIO)
+   ============================================================================== */
+
+/* Base responsiva */
+html, body {
+    max-width: 100%;
+    overflow-x: hidden;
 }
+
+img, video, canvas {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Tablas con scroll táctil suave en móviles */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 0.75rem;
+}
+
+.table-responsive table {
+    min-width: 520px;
+}
+
+/* Scroll táctil suave para croquis de bus */
+.croquis-scroll {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+}
+
+/* Mapas adaptables */
+#student-map, #admin-map, #global-map, #routing-map, #op-map, #paradas-map, #admin-paradas-map {
+    width: 100%;
+    height: clamp(260px, 45vh, 400px);
+    min-height: 250px;
+}
+
+/* Botón Menú Flotante móvil */
+.menu-toggle {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 850;
+    width: auto;
+    background: #0c2340;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(8px);
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.menu-toggle:active {
+    transform: scale(0.96);
+}
+
+/* Breakpoint Tablet / Móvil Grande (<= 860px) */
+@media (max-width: 860px) {
+    .menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .sidebar {
+        transform: translateX(-105%);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        width: min(290px, 86vw);
+        box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+    }
+    .sidebar.abierto {
+        transform: none;
+    }
+    .main-content {
+        margin-left: 0 !important;
+        padding: 4.2rem 1rem 2rem !important;
+        width: 100%;
+    }
+    .container {
+        padding: 0.75rem !important;
+        max-width: 100% !important;
+    }
+    .grid-2, .grid-3 {
+        grid-template-columns: 1fr !important;
+    }
+    .trip-item, .navbar, .appbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    .progress-container {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+    .btn-group {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+    .btn-group .btn {
+        flex: 1 1 auto;
+    }
+    .stat-card {
+        padding: 1rem;
+    }
+}
+
+/* Breakpoint Móvil Estándar (<= 640px) */
+@media (max-width: 640px) {
+    h1 { font-size: 1.45rem; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.05rem; }
+    
+    .card {
+        padding: 1rem;
+        border-radius: 4px;
+    }
+    
+    .trip-header {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        padding: 1rem !important;
+        gap: 0.85rem !important;
+    }
+    .trip-header > div:last-child {
+        text-align: left !important;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .trip-header .badge {
+        align-self: flex-start;
+    }
+    
+    .flex-center {
+        padding: 1rem 0.5rem 2rem;
+    }
+    
+    .face-scanner {
+        max-width: 100%;
+        height: clamp(280px, 55vh, 360px);
+    }
+    
+    .btn {
+        width: 100%;
+        padding: 0.8rem 1rem;
+        font-size: 0.95rem;
+    }
+    .btn-auto {
+        width: auto !important;
+    }
+    
+    /* Indicadores de pasos de registro */
+    .step-indicator {
+        padding: 0.5rem 0.25rem;
+        font-size: 0.7rem;
+    }
+    .step-indicator span {
+        font-size: 0.8rem;
+    }
+    
+    /* Diálogos modales de SweetAlert */
+    .swal2-popup {
+        width: 92vw !important;
+        padding: 1.2rem 1rem !important;
+    }
+}
+
+/* Breakpoint Móvil Pequeño (<= 380px) */
+@media (max-width: 380px) {
+    .container {
+        padding: 0.5rem !important;
+    }
+    .card {
+        padding: 0.8rem;
+    }
+    .progress-container {
+        grid-template-columns: 1fr;
+    }
+    .face-scanner {
+        height: 290px;
+    }
+}
+

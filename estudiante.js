@@ -193,7 +193,36 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 if (guia) guia.innerHTML = '<strong>Paso actual: espera de transporte</strong><p>Ya está anotado. El superadministrador indicará la unidad. Cuando eso ocurra podrá reservar asiento y, después, la parada de subida.</p>';
                 cargarMiembrosGenerales(viaje.id);
             }
+            const esParado = session.asiento && String(session.asiento).startsWith('Parado');
+            const cardCroquis = document.getElementById('card-croquis-asientos');
+            const cardParado = document.getElementById('card-usuario-parado');
+
+            if (esParado) {
+                // LOS USUARIOS PARADOS NO TIENEN ACCESO AL CROQUIS
+                document.getElementById('panel-croquis').style.display = 'block';
+                if (cardCroquis) cardCroquis.style.display = 'none';
+                if (cardParado) {
+                    cardParado.style.display = 'block';
+                    const slotTxt = document.getElementById('parado-slot-txt');
+                    if (slotTxt) slotTxt.innerText = session.asiento;
+                }
+                if (panelParada) panelParada.style.display = 'block';
+                document.getElementById('v-transporte').style.color = 'var(--text)';
+                if (window.seatTimerInterval) clearInterval(window.seatTimerInterval);
+
+                cargarMiembros(session.transporte_id);
+                cargarMiembrosGenerales(viaje.id);
+
+                if (guia) {
+                    const parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta));
+                    guia.innerHTML = parada
+                        ? `<strong>Registro del viaje completo</strong><p>Viajas de pie en esta unidad (${escaparHtml(session.asiento)}) y parada confirmada en <b>${escaparHtml(parada.nombre || 'confirmada')}</b>. El día de la salida confirma tu asistencia.</p>`
+                        : `<strong>Paso actual: parada de subida</strong><p>Viajas de pie (${escaparHtml(session.asiento)}). No requieres reservar asiento en el croquis. <b>Indica abajo la parada donde vas a subir</b>.</p>`;
+                }
+            }
             else if (estado === 'asignado' || estado === 'asiento_elegido') {
+                if (cardParado) cardParado.style.display = 'none';
+                if (cardCroquis) cardCroquis.style.display = 'block';
                 document.getElementById('panel-croquis').style.display = 'block';
                 document.getElementById('v-transporte').style.color = 'var(--text)';
                 
@@ -224,52 +253,51 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         if (guia && estado === 'asignado') guia.innerHTML = '<strong>Paso actual: espera de asientos</strong><p>Ya tiene transporte. Podrá elegir asiento cuando abra el horario indicado arriba.</p>';
                     }
                     else if (now >= inicio && now <= cierre) {
-                    const diff = cierre - now;
-                    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
-                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                    const s = Math.floor((diff % (1000 * 60)) / 1000);
-                    
-                    window.seleccionAsientosAbierta = true;
-                    timerDiv.style.display = 'block';
-                    timerDiv.className = 'aviso aviso-ok';
-                    timerDiv.innerHTML = `Selección abierta. Cierra en ${d > 0 ? d + ' d, ' : ''}${h} h, ${m} min, ${s} s.`;
-                    if (guia && estado === 'asignado') guia.innerHTML = '<strong>Paso actual: reserva de asiento</strong><p>Elija un asiento libre en el croquis. La parada de subida se habilita después.</p>';
-                    
-                    if(!window.croquisRendered) {
-                        renderCroquisEstudiante(viaje.id, session.transporte_id);
-                        window.croquisRendered = true;
-                    }
-                } 
-                else {
-                    window.seleccionAsientosAbierta = false;
-                    timerDiv.style.display = 'block';
-                    timerDiv.className = 'aviso aviso-cerrado';
-                    timerDiv.innerHTML = 'El periodo de selección ha finalizado.';
-                    
-                    if(estado !== 'asiento_elegido') {
-                        croquisDiv.innerHTML = `<p class="text-center" style="margin:20px;">Ya no puedes seleccionar asiento.</p>`;
-                    } else {
-                        // Ya eligió, mostrar croquis de solo lectura
+                        const diff = cierre - now;
+                        const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                        const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                        const s = Math.floor((diff % (1000 * 60)) / 1000);
+                        
+                        window.seleccionAsientosAbierta = true;
+                        timerDiv.style.display = 'block';
+                        timerDiv.className = 'aviso aviso-ok';
+                        timerDiv.innerHTML = `Selección abierta. Cierra en ${d > 0 ? d + ' d, ' : ''}${h} h, ${m} min, ${s} s.`;
+                        if (guia && estado === 'asignado') guia.innerHTML = '<strong>Paso actual: reserva de asiento</strong><p>Elija un asiento libre en el croquis. La parada de subida se habilita después.</p>';
+                        
                         if(!window.croquisRendered) {
                             renderCroquisEstudiante(viaje.id, session.transporte_id);
                             window.croquisRendered = true;
                         }
+                    } 
+                    else {
+                        window.seleccionAsientosAbierta = false;
+                        timerDiv.style.display = 'block';
+                        timerDiv.className = 'aviso aviso-cerrado';
+                        timerDiv.innerHTML = 'El periodo de selección ha finalizado.';
+                        
+                        if(estado !== 'asiento_elegido') {
+                            croquisDiv.innerHTML = `<p class="text-center" style="margin:20px;">Ya no puedes seleccionar asiento.</p>`;
+                        } else {
+                            // Ya eligió, mostrar croquis de solo lectura
+                            if(!window.croquisRendered) {
+                                renderCroquisEstudiante(viaje.id, session.transporte_id);
+                                window.croquisRendered = true;
+                            }
+                        }
                     }
                 }
+                
+                if (estado === 'asiento_elegido' && guia) {
+                    const parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta));
+                    const textoLugar = `Asiento ${session.asiento}`;
+                    guia.innerHTML = parada
+                        ? `<strong>Registro del viaje completo</strong><p>${escaparHtml(textoLugar)} y parada ${escaparHtml(parada.nombre || 'confirmada')}. El día de la salida confirme la asistencia en ese punto.</p>`
+                        : `<strong>Paso actual: parada de subida</strong><p>El ${escaparHtml(textoLugar)} ya está reservado. Indique dónde va a subir. Si elige otro punto, queda pendiente de aprobación.</p>`;
+                }
+                updateSeatTimer();
+                window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
             }
-            
-            if (estado === 'asiento_elegido' && guia) {
-                const parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta));
-                const esParado = session.asiento && String(session.asiento).startsWith('Parado');
-                const textoLugar = esParado ? `Lugar de pie (${session.asiento})` : `Asiento ${session.asiento}`;
-                guia.innerHTML = parada
-                    ? `<strong>Registro del viaje completo</strong><p>${escaparHtml(textoLugar)} y parada ${escaparHtml(parada.nombre || 'confirmada')}. El día de la salida confirme la asistencia en ese punto.</p>`
-                    : `<strong>Paso actual: parada de subida</strong><p>El ${escaparHtml(textoLugar)} ya está reservado. Indique dónde va a subir. Si elige otro punto, queda pendiente de aprobación.</p>`;
-            }
-            updateSeatTimer();
-            window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
-        }
 
         // Cargar Ruta en el Mapa siguiendo calles reales (OSRM / GPS)
         const puntosRuta = puntosDeRuta(viaje.ruta);
@@ -499,6 +527,19 @@ function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
 }
 
 async function renderCroquisEstudiante(viajeId, transporteId) {
+    // Si el usuario viaja de pie, NO TIENE ACCESO AL CROQUIS
+    if (session.asiento && String(session.asiento).startsWith('Parado')) {
+        const cardCroquis = document.getElementById('card-croquis-asientos');
+        if (cardCroquis) cardCroquis.style.display = 'none';
+        const cardParado = document.getElementById('card-usuario-parado');
+        if (cardParado) {
+            cardParado.style.display = 'block';
+            const slotTxt = document.getElementById('parado-slot-txt');
+            if (slotTxt) slotTxt.innerText = session.asiento;
+        }
+        return;
+    }
+
     const croquisDiv = document.getElementById('croquis');
     if (!croquisDiv) return;
     
@@ -584,6 +625,9 @@ function genSeat(numero, ocupadosInfo, miAsiento) {
 }
 
 function selectSeat(seatElement, numero, ocupanteNombre) {
+    if (session.asiento && String(session.asiento).startsWith('Parado')) {
+        return Swal.fire('Viaje de pie', 'Has sido asignado para viajar de pie en esta unidad. No requieres ni tienes acceso a reservar un asiento en el croquis.', 'info');
+    }
     if (!window.seleccionAsientosAbierta) {
         return Swal.fire('Fuera de horario', 'La selección de asientos no está abierta.', 'info');
     }
