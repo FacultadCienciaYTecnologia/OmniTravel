@@ -131,10 +131,9 @@
                             cámara para generar tu clave biométrica. Asegúrate de tener buena luz.</p>
 
                         <div class="face-scanner mb-2" id="cam-container">
-                            <video id="video-registro" autoplay muted playsinline></video>
+                            <video id="video-registro" autoplay muted playsinline webkit-playsinline></video>
                             <div class="face-overlay" id="overlay"></div>
-                            <canvas id="canvas-overlay-reg"
-                                style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                            <canvas id="canvas-overlay-reg"></canvas>
                         </div>
 
                         <img id="img-perfil" class="mx-auto"

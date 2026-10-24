@@ -343,27 +343,67 @@ button:disabled, .btn:disabled {
 .face-scanner {
     position: relative;
     width: 100%;
-    max-width: 420px;
+    max-width: 360px;
+    height: 380px;
     margin: 0 auto;
     border: 1px solid var(--line);
-    background: #111;
+    border-radius: var(--radius-md);
+    background: #000;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-.face-scanner video, .face-scanner canvas {
-    width: 100%;
-    height: auto;
-    max-height: 320px;
-    object-fit: contain;
+.face-scanner video {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
     transform: scaleX(-1);
+    -webkit-transform: scaleX(-1);
+    display: block !important;
+    z-index: 1;
+}
+.face-scanner canvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    transform: scaleX(-1);
+    -webkit-transform: scaleX(-1);
+    pointer-events: none;
+    z-index: 2;
+    display: block !important;
 }
 .face-overlay {
-    position: absolute; top: 12%; left: 22%; width: 56%; height: 76%;
-    border: 2px solid rgba(255,255,255,0.85);
+    position: absolute;
+    top: 10%;
+    left: 14%;
+    width: 72%;
+    height: 80%;
+    border: 2.5px solid rgba(255, 255, 255, 0.9);
+    border-radius: 24px;
     pointer-events: none;
+    z-index: 3;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
-.face-overlay.scanning { border-color: #d7e4f2; }
-.face-overlay.success { border-color: #8fceb0; }
-.face-overlay.error { border-color: #e3b1b1; }
+.face-overlay.scanning {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+}
+.face-overlay.success {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+}
+.face-overlay.error {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+}
 
 div:where(.swal2-container) div:where(.swal2-popup) {
     border-radius: 2px !important;

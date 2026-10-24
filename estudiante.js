@@ -239,9 +239,11 @@ async function loadEstudianteDashboard(skipFetch = false) {
             
             if (estado === 'asiento_elegido' && guia) {
                 const parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta));
+                const esParado = session.asiento && String(session.asiento).startsWith('Parado');
+                const textoLugar = esParado ? `Lugar de pie (${session.asiento})` : `Asiento ${session.asiento}`;
                 guia.innerHTML = parada
-                    ? `<strong>Registro del viaje completo</strong><p>Asiento ${escaparHtml(session.asiento)} y parada ${escaparHtml(parada.nombre || 'confirmada')}. El día de la salida confirme la asistencia en ese punto.</p>`
-                    : `<strong>Paso actual: parada de subida</strong><p>El asiento ${escaparHtml(session.asiento)} ya está reservado. Indique dónde va a subir. Si elige otro punto, queda pendiente de aprobación.</p>`;
+                    ? `<strong>Registro del viaje completo</strong><p>${escaparHtml(textoLugar)} y parada ${escaparHtml(parada.nombre || 'confirmada')}. El día de la salida confirme la asistencia en ese punto.</p>`
+                    : `<strong>Paso actual: parada de subida</strong><p>El ${escaparHtml(textoLugar)} ya está reservado. Indique dónde va a subir. Si elige otro punto, queda pendiente de aprobación.</p>`;
             }
             updateSeatTimer();
             window.seatTimerInterval = setInterval(updateSeatTimer, 1000);
@@ -488,7 +490,11 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     }
 
     const miAsiento = session.asiento;
-    croquisDiv.innerHTML = htmlAsientos(plazasPorTipo(t.tipo), (n) => genSeat(n, asientosOcupados, miAsiento));
+    let standingBanner = '';
+    if (miAsiento && String(miAsiento).startsWith('Parado')) {
+        standingBanner = `<div class="aviso aviso-info" style="margin-bottom:1rem;"><strong>Lugar de pie asignado:</strong> Tienes asignado el lugar <b>${escaparHtml(miAsiento)}</b> en el Transporte 2. Tu registro en el viaje está confirmado.</div>`;
+    }
+    croquisDiv.innerHTML = standingBanner + htmlAsientos(plazasPorTipo(t.tipo), (n) => genSeat(n, asientosOcupados, miAsiento));
 }
 
 function genSeat(numero, ocupadosInfo, miAsiento) {

@@ -122,12 +122,18 @@ async function startRegistroFace() {
             audio: false 
         });
         const video = document.getElementById('video-registro');
+        video.muted = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
         video.srcObject = currentStream;
+        await video.play().catch(e => console.log('Video play catch:', e));
         
         document.getElementById('btn-start-cam').style.display = 'none';
         
         // Esperar a que el video empiece a reproducirse para analizar
         video.onloadedmetadata = () => {
+            video.play().catch(e => console.log(e));
             const btnTake = document.getElementById('btn-take-foto');
             btnTake.disabled = true; // Bloqueado hasta pasar prueba de vida
             window.livenessStage = 0; // Reiniciar estado
@@ -139,6 +145,7 @@ async function startRegistroFace() {
         };
 
     } catch (err) {
+        console.error(err);
         Swal.fire('Error', 'No se pudo acceder a la cámara.', 'error');
     }
 }
@@ -149,10 +156,15 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
     const btn = document.getElementById(btnId);
     const statusLabel = document.getElementById('face-reg-status');
     
-    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+    let displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
     faceapi.matchDimensions(canvas, displaySize);
     
+    if (faceInterval) clearInterval(faceInterval);
     faceInterval = setInterval(async () => {
+        if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+            displaySize = { width: video.videoWidth, height: video.videoHeight };
+            faceapi.matchDimensions(canvas, displaySize);
+        }
         const detections = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceExpressions().withFaceDescriptor();
         
         const ctx = canvas.getContext('2d');
@@ -257,11 +269,17 @@ async function startFaceLogin() {
             audio: false 
         });
         const video = document.getElementById('video-login');
+        video.muted = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
         video.srcObject = currentStream;
+        await video.play().catch(e => console.log('Video play catch:', e));
         
         document.getElementById('btn-start-face').style.display = 'none';
         
         video.onloadedmetadata = () => {
+            video.play().catch(e => console.log(e));
             if(faceModelsLoaded) {
                 document.getElementById('overlay-login').classList.add('scanning');
                 document.getElementById('face-status').innerText = "Escaneando rostro...";
@@ -269,13 +287,14 @@ async function startFaceLogin() {
             }
         };
     } catch (err) {
+        console.error(err);
         Swal.fire('Error', 'No se pudo acceder a la cámara.', 'error');
     }
 }
 
 function loginDetectFaceLoop(video) {
     const canvas = document.getElementById('canvas-overlay');
-    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+    let displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
     faceapi.matchDimensions(canvas, displaySize);
     
     let attempts = 0;
@@ -283,6 +302,10 @@ function loginDetectFaceLoop(video) {
     const statusLabel = document.getElementById('face-status');
     
     const interval = setInterval(async () => {
+        if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+            displaySize = { width: video.videoWidth, height: video.videoHeight };
+            faceapi.matchDimensions(canvas, displaySize);
+        }
         attempts++;
         if (attempts > 60) { // Aumentado para dar tiempo a girar la cabeza
             clearInterval(interval);

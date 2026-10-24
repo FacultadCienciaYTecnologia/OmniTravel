@@ -312,12 +312,15 @@
                         <select id="asig-filtro-transporte" onchange="pintarAsignacion(true)" style="padding:6px 12px; border:1px solid var(--line); border-radius:4px; max-width:340px; font-size:0.95rem; font-weight:600;">
                             <option value="todos">Todos los inscritos</option>
                             <option value="bus_1">Bus 1</option>
-                            <option value="bus_2">Bus 2</option>
+                            <option value="bus_2">Bus 2 (Todos)</option>
+                            <option value="bus_2_sentados">Bus 2 - Sentados (50)</option>
+                            <option value="bus_2_parados">Bus 2 - De pie / Parados (4)</option>
                             <option value="microbus">Microbús</option>
                             <option value="motos">Motocicletas</option>
                             <option value="sin_unidad">Sin asignar a transporte</option>
                         </select>
                     </div>
+                    <div id="asig-apartado-parados" class="mb-3" style="display:none;"></div>
                     <div id="asig-resumen" class="mb-3"></div>
                     <div class="table-responsive">
                         <table>
@@ -492,9 +495,9 @@
                                 <input type="file" id="t-file-img" accept="image/*" style="width:100%; padding:8px; border: 1px solid var(--card-border); border-radius: var(--radius-sm); background: #fff;">
                             </div>
                             <div>
-                                <label id="lbl-t-admin">Chofer Asignado (Admin) <span id="badge-admin-req" style="color:var(--error); font-size:0.8rem; font-weight:normal;">*Requerido para Autobús</span></label>
+                                <label id="lbl-t-admin">Chofer Asignado (Admin) <span id="badge-admin-req" style="color:var(--text-muted); font-size:0.8rem; font-weight:normal;">(Opcional)</span></label>
                                 <select id="t-admin-select" style="width:100%; padding:8px;">
-                                    <option value="">Seleccione un administrador (o dejar vacío)...</option>
+                                    <option value="">Sin chofer asignado (Opcional)...</option>
                                 </select>
                             </div>
                             <div style="grid-column: 1 / -1;">
