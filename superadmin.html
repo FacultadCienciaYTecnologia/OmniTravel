@@ -96,6 +96,31 @@
             </div>
         </aside>
 
+        <!-- Script de restauración inmediata de pestaña activa -->
+        <script>
+            (function() {
+                try {
+                    var hash = (window.location.hash || '').replace('#', '').trim();
+                    var saved = localStorage.getItem('omni_superadmin_tab');
+                    var target = hash || saved;
+                    if (target && target !== 'dashboard') {
+                        document.addEventListener('DOMContentLoaded', function() {
+                            var menuItem = document.querySelector('.menu-item[data-target="' + target + '"]');
+                            var tab = document.getElementById(target);
+                            if (menuItem && tab) {
+                                document.querySelectorAll('.sidebar-menu .menu-item').forEach(function(i) { i.classList.remove('active'); });
+                                document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+                                menuItem.classList.add('active');
+                                tab.classList.add('active');
+                                var hTitle = document.getElementById('header-title');
+                                if (hTitle) hTitle.innerText = menuItem.innerText.replace(/[0-9]/g, '').trim();
+                            }
+                        });
+                    }
+                } catch(e) {}
+            })();
+        </script>
+
         <!-- CONTENIDO PRINCIPAL -->
         <div class="main-content">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">

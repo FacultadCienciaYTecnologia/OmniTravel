@@ -18,29 +18,75 @@ function logout() {
 const menuItems = document.querySelectorAll('.menu-item[data-target]');
 const tabContents = document.querySelectorAll('.tab-content');
 
+function activarTab(targetId, guardar = true) {
+    if (!targetId) return;
+    const item = document.querySelector(`.menu-item[data-target="${targetId}"]`);
+    const content = document.getElementById(targetId);
+    if (!item || !content) return;
+
+    menuItems.forEach(i => i.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+
+    item.classList.add('active');
+    content.classList.add('active');
+
+    const titleEl = document.getElementById('header-title');
+    if (titleEl) {
+        titleEl.innerText = item.innerText.replace(/[0-9]/g, '').trim();
+    }
+
+    if (guardar) {
+        try {
+            localStorage.setItem('omni_superadmin_tab', targetId);
+            if (window.location.hash !== '#' + targetId) {
+                history.replaceState(null, '', '#' + targetId);
+            }
+        } catch(e) {}
+    }
+
+    // Acciones y redimensiones específicas según el tab
+    if (targetId === 'viajes' && typeof routingMap !== 'undefined' && routingMap) {
+        setTimeout(() => { routingMap.invalidateSize(); }, 150);
+    }
+    if (targetId === 'dashboard' && typeof globalMap !== 'undefined' && globalMap) {
+        setTimeout(() => { globalMap.invalidateSize(); }, 150);
+    }
+    if (targetId === 'evidencias' && typeof cargarEvidencias === 'function') cargarEvidencias();
+    if (targetId === 'asignacion' && typeof cargarAsignacionPanel === 'function') cargarAsignacionPanel();
+    if (targetId === 'asistencia' && typeof cargarControlAsistencia === 'function') cargarControlAsistencia();
+    if (targetId === 'operacion' && typeof cargarOperacion === 'function') cargarOperacion();
+    if (targetId === 'paradas' && typeof cargarSolicitudesSuper === 'function') cargarSolicitudesSuper();
+}
+
 menuItems.forEach(item => {
     item.addEventListener('click', () => {
-        menuItems.forEach(i => i.classList.remove('active'));
-        tabContents.forEach(c => c.classList.remove('active'));
-        
-        item.classList.add('active');
-        document.getElementById(item.dataset.target).classList.add('active');
-        document.getElementById('header-title').innerText = item.innerText.replace(/[0-9]/g, '').trim();
-
-        // Si se abre el tab de viajes, asegurar que el mapa renderice correctamente
-        if(item.dataset.target === 'viajes') {
-            setTimeout(() => { routingMap.invalidateSize(); }, 100);
-        }
-        if(item.dataset.target === 'dashboard') {
-            setTimeout(() => { globalMap.invalidateSize(); }, 100);
-        }
-        if(item.dataset.target === 'evidencias') cargarEvidencias();
-        if(item.dataset.target === 'asignacion') cargarAsignacionPanel();
-        if(item.dataset.target === 'asistencia') cargarControlAsistencia();
-        if(item.dataset.target === 'operacion') cargarOperacion();
-        if(item.dataset.target === 'paradas') cargarSolicitudesSuper();
+        activarTab(item.dataset.target, true);
     });
 });
+
+window.addEventListener('hashchange', () => {
+    const hash = (window.location.hash || '').replace('#', '').trim();
+    if (hash && document.getElementById(hash)) {
+        activarTab(hash, false);
+    }
+});
+
+function restaurarPestanaActiva() {
+    const hash = (window.location.hash || '').replace('#', '').trim();
+    const guardada = localStorage.getItem('omni_superadmin_tab');
+    let target = 'dashboard';
+    if (hash && document.getElementById(hash)) {
+        target = hash;
+    } else if (guardada && document.getElementById(guardada)) {
+        target = guardada;
+    }
+    activarTab(target, false);
+}
+
+// Restaurar de inmediato la pestaña activa
+restaurarPestanaActiva();
+window.activarTab = activarTab;
+window.restaurarPestanaActiva = restaurarPestanaActiva;
 
 // ====== CARGA DE DATOS INICIALES ======
 async function loadDashboard() {
@@ -499,8 +545,7 @@ async function editarRecorrido(id) {
     const { data: viaje, error } = await window.db.from('viajes').select('*').eq('id', id).single();
     if (error || !viaje) return Swal.fire('Viaje', 'No se pudo abrir el recorrido.', 'error');
     window.viajeEnEdicion = viaje;
-    const item = document.querySelector('.menu-item[data-target="viajes"]');
-    if (item) item.click();
+    activarTab('viajes', true);
     document.getElementById('v-nombre').value = viaje.titulo || '';
     document.getElementById('v-fecha').value = aDatetimeLocal(viaje.fecha_salida);
     document.getElementById('v-inicio-asientos').value = aDatetimeLocal(viaje.inicio_asientos);
@@ -685,7 +730,7 @@ function renderViajes(viajes) {
         const btnCroquis = `<button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='block'; window.scrollTo(0, document.getElementById('admin-croquis-container').offsetTop);">Ver Croquis</button>`;
         const btnRuta = `<button class="btn btn-outline btn-auto" onclick="editarRecorrido('${v.id}')">Editar recorrido</button>`;
         const btnEdit = `<button class="btn btn-outline btn-auto" onclick="editarViaje('${v.id}')">Editar datos</button>`;
-        const btnMapa = `<button class="btn btn-outline btn-auto" onclick="verRutaActiva('${v.id}')">Ver en mapa</button>`;
+        const btnMapa = `<button class="btn btn-outline btn-auto" onclick="verRutaActiva('${v.id}', false, true)">Ver en mapa</button>`;
         const btnDelete = `<button class="btn btn-danger btn-auto" onclick="eliminarViaje('${v.id}')">Eliminar</button>`;
         const btnRestart = v.estado === 'finalizado' ? `<button class="btn btn-warning btn-auto" style="background:#eab308; border-color:#ca8a04; color:#fff;" onclick="reiniciarViaje('${v.id}')">Reiniciar</button>` : '';
 
@@ -800,7 +845,8 @@ async function eliminarViaje(id) {
             await window.db.from('viajes').delete().eq('id', id);
             
             Swal.fire('Eliminado', 'El viaje ha sido borrado.', 'success');
-            loadDashboard();
+            await loadDashboard();
+            restaurarPestanaActiva();
         } catch(e) { 
             console.error(e);
             Swal.fire('Error', 'No se pudo eliminar completamente.', 'error'); 
@@ -1326,8 +1372,7 @@ async function asignarDesdeSuper(usuarioId, transporteId, viajeId) {
 function irAAsignacion(viajeId) {
     window.asignacionViajeId = viajeId || '';
     cerrarModalTransportes();
-    const item = document.querySelector('.menu-item[data-target="asignacion"]');
-    if (item) item.click();
+    activarTab('asignacion', true);
 }
 
 async function cargarAsignacionPanel() {
@@ -1982,9 +2027,11 @@ function pintarMapaSolicitudes(enfocarId) {
 function verPuntoSolicitud(id) {
     window.solicitudEnfocada = id;
     const tab = document.getElementById('paradas');
-    const item = document.querySelector('.menu-item[data-target="paradas"]');
-    if (tab && !tab.classList.contains('active') && item) item.click();
-    else pintarMapaSolicitudes(id);
+    if (tab && !tab.classList.contains('active')) {
+        activarTab('paradas', true);
+    } else {
+        pintarMapaSolicitudes(id);
+    }
     const caja = document.getElementById('paradas-map');
     if (caja) caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -2290,20 +2337,22 @@ document.getElementById('btn-bib-mapa').addEventListener('click', () => {
 
 async function pintarGpsGlobal() {
     if (window.currentViajeMonitoreo) {
-        verRutaActiva(window.currentViajeMonitoreo);
+        verRutaActiva(window.currentViajeMonitoreo, false, false);
         return;
     }
     const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, ruta').neq('estado', 'finalizado');
     if (!viajes || !viajes.length) return;
     const conRuta = viajes.find((v) => puntosDeRuta(v.ruta).length > 1) || viajes[0];
     if (conRuta) {
-        verRutaActiva(conRuta.id);
+        verRutaActiva(conRuta.id, false, false);
     }
 }
 
-async function verRutaActiva(viajeId, soloMarcadores) {
+async function verRutaActiva(viajeId, soloMarcadores, cambiarTab = false) {
     window.currentViajeMonitoreo = viajeId;
-    document.querySelector('.menu-item[data-target="dashboard"]').click();
+    if (cambiarTab) {
+        activarTab('dashboard', true);
+    }
     const { data: viaje } = await window.db.from('viajes').select('*').eq('id', viajeId).single();
     if (!viaje) return;
 
@@ -3169,4 +3218,6 @@ window.cambiarAbordoSuper = cambiarAbordoSuper;
 window.filtrarListaAsistencia = filtrarListaAsistencia;
 
 // Inicializar
-loadDashboard();
+loadDashboard().then(() => {
+    restaurarPestanaActiva();
+});
