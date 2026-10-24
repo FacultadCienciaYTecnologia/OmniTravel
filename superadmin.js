@@ -14,7 +14,15 @@ function logout() {
     window.location.href = 'index.html';
 }
 
-// ====== SPA TABS LOGIC ======
+// ====== SPA TABS LOGIC Y MAPAS GLOBALES ======
+var globalMap = null;
+var routingMap = null;
+var routeControl = null;
+var opMap = null;
+var opMarker = null;
+var opWatch = null;
+var paradasMap = null;
+var paradasCapas = [];
 const menuItems = document.querySelectorAll('.menu-item[data-target]');
 const tabContents = document.querySelectorAll('.tab-content');
 
@@ -437,13 +445,13 @@ async function vaciarBaseDeDatos() {
 }
 
 // ====== MAPAS Y RUTAS (LEAFLET ROUTING MACHINE) ======
-const globalMap = L.map('global-map').setView([13.6929, -89.2182], 12); // Global map
+globalMap = L.map('global-map').setView([13.6929, -89.2182], 12); // Global map
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(globalMap);
 
-const routingMap = L.map('routing-map').setView([13.6929, -89.2182], 12);
+routingMap = L.map('routing-map').setView([13.6929, -89.2182], 12);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(routingMap);
 
-let routeControl = L.Routing.control({
+routeControl = L.Routing.control({
     waypoints: [],
     routeWhileDragging: true,
     language: 'es',
@@ -1963,8 +1971,9 @@ async function cargarSolicitudesSuper() {
     }
 }
 
-let paradasMap = null;
-let paradasCapas = [];
+// paradasMap y paradasCapas declarados globalmente al inicio
+paradasMap = paradasMap || null;
+paradasCapas = paradasCapas || [];
 
 function asegurarMapaParadas() {
     const caja = document.getElementById('paradas-map');
@@ -2597,9 +2606,10 @@ async function resolverEvidencia(id, estado) {
 }
 
 const opNoSleep = (typeof NoSleep !== 'undefined') ? new NoSleep() : { enable() {}, disable() {} };
-let opMap = null;
-let opMarker = null;
-let opWatch = null;
+// opMap, opMarker y opWatch declarados globalmente al inicio
+opMap = opMap || null;
+opMarker = opMarker || null;
+opWatch = opWatch || null;
 
 function asegurarMapaOperacion() {
     const caja = document.getElementById('op-map');

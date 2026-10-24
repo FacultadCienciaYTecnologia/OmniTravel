@@ -107,6 +107,9 @@
                 document.querySelector('.login-mode-btn:nth-child(2)').classList.add('active');
                 document.getElementById('login-email').style.display = 'none';
                 document.getElementById('login-face').style.display = 'block';
+                // Precargar modelos y descriptores biométricos inmediatamente al abrir la pestaña
+                if (typeof loadFaceModels === 'function') loadFaceModels();
+                if (typeof prefetchFaceData === 'function') prefetchFaceData();
             }
         }
 
@@ -117,16 +120,17 @@
             btn.disabled = true;
             btn.innerText = "Verificando...";
 
-            const email = document.getElementById('email').value.trim();
+            const emailInput = document.getElementById('email').value.trim();
+            const emailLower = emailInput.toLowerCase();
             const passwordStr = document.getElementById('password').value;
             const hashedPassword = CryptoJS.SHA256(passwordStr).toString();
 
             try {
-                // Buscar por email o DNI
+                // Buscar por email en minúsculas o por DNI/Documento
                 const { data, error } = await window.db
                     .from('usuarios')
                     .select('*')
-                    .or(`email.eq.${email},dni.eq.${email}`)
+                    .or(`email.eq.${emailLower},dni.eq.${emailInput}`)
                     .eq('password', hashedPassword)
                     .maybeSingle();
 

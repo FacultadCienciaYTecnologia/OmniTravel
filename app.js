@@ -91,39 +91,133 @@ function cargarMunicipios() {
     }
 }
 
-async function loadFaceModels() {
-    const CDNS = [
-        'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights',
-        'https://justadudewhohacks.github.io/face-api.js/models'
-    ];
-    
-    for (const url of CDNS) {
-        try {
-            await Promise.all([
-                faceapi.nets.ssdMobilenetv1.loadFromUri(url),
-                faceapi.nets.faceLandmark68Net.loadFromUri(url),
-                faceapi.nets.faceRecognitionNet.loadFromUri(url)
-            ]);
-            faceModelsLoaded = true;
-            console.log("Modelos Face-API cargados exitosamente desde:", url);
-            return;
-        } catch (e) {
-            console.warn("Fallo cargando modelos desde", url, e);
-        }
+let faceModelsLoadingPromise = null;
+let cachedFaceUsers = null;
+let cachedFaceMatcher = null;
+
+// Obtener las mejores opciones de detección disponibles (TinyFaceDetector ultra-rápido o SSD)
+function getFaceDetectorOptions() {
+    if (typeof faceapi !== 'undefined' && faceapi.nets && faceapi.nets.tinyFaceDetector && faceapi.nets.tinyFaceDetector.params) {
+        return new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
     }
-    console.error("No se pudieron cargar modelos Face-API.");
-    Swal.fire('Aviso', 'No se pudieron descargar los modelos faciales. Por favor verifica tu conexión.', 'warning');
+    return new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
 }
 
-// Cargar modelos al iniciar si estamos en registro o login facial
-if(document.getElementById('video-registro') || document.getElementById('video-login')) {
+// Carga asíncrona robusta con promesas compartidas y soporte offline/CDN
+async function loadFaceModels() {
+    if (faceModelsLoaded) return true;
+    if (faceModelsLoadingPromise) return faceModelsLoadingPromise;
+
+    faceModelsLoadingPromise = (async () => {
+        const CDNS = [
+            'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights',
+            'https://justadudewhohacks.github.io/face-api.js/models'
+        ];
+
+        for (const url of CDNS) {
+            try {
+                // Intentar cargar TinyFaceDetector (190 KB), Landmarks y Recognition
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(url),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(url),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(url)
+                ]);
+                faceModelsLoaded = true;
+                console.log("Modelos Face-API (TinyDetector + Landmarks + Recognition) cargados desde:", url);
+
+                // Cargar SSD en segundo plano como respaldo sin bloquear la UI
+                faceapi.nets.ssdMobilenetv1.loadFromUri(url).catch(() => {});
+                return true;
+            } catch (e) {
+                console.warn("Fallo cargando TinyFaceDetector desde", url, e);
+                // Si falla Tiny, intentar con SSD MobileNet
+                try {
+                    await Promise.all([
+                        faceapi.nets.ssdMobilenetv1.loadFromUri(url),
+                        faceapi.nets.faceLandmark68Net.loadFromUri(url),
+                        faceapi.nets.faceRecognitionNet.loadFromUri(url)
+                    ]);
+                    faceModelsLoaded = true;
+                    console.log("Modelos Face-API (SSD) cargados desde:", url);
+                    return true;
+                } catch (e2) {
+                    console.warn("Fallo cargando SSD desde", url, e2);
+                }
+            }
+        }
+
+        console.error("No se pudieron cargar modelos Face-API desde los CDNs.");
+        Swal.fire('Aviso', 'No se pudieron descargar los modelos faciales. Por favor verifica tu conexión a internet.', 'warning');
+        return false;
+    })();
+
+    const result = await faceModelsLoadingPromise;
+    faceModelsLoadingPromise = null;
+    return result;
+}
+
+// Pre-cargar los modelos biométricos al iniciar si existen los contenedores
+if (document.getElementById('video-registro') || document.getElementById('video-login')) {
     loadFaceModels();
 }
 
+// Precargar descriptores de usuarios registrados para verificación instantánea
+async function prefetchFaceData() {
+    if (cachedFaceMatcher && cachedFaceUsers) return { matcher: cachedFaceMatcher, users: cachedFaceUsers };
+    try {
+        const { data: users, error } = await window.db
+            .from('usuarios')
+            .select('id, nombre_completo, rol, estado_aprobacion, face_descriptor')
+            .not('face_descriptor', 'is', null);
+
+        if (error || !users || !users.length) {
+            cachedFaceUsers = [];
+            cachedFaceMatcher = null;
+            return { matcher: null, users: [] };
+        }
+
+        const labeled = [];
+        users.forEach(u => {
+            let desc = u.face_descriptor;
+            if (typeof desc === 'string') {
+                try { desc = JSON.parse(desc); } catch (e) { desc = null; }
+            }
+            if (desc && !Array.isArray(desc) && typeof desc === 'object') {
+                desc = Object.values(desc);
+            }
+            if (Array.isArray(desc) && desc.length === 128) {
+                labeled.push(new faceapi.LabeledFaceDescriptors(String(u.id), [new Float32Array(desc)]));
+            }
+        });
+
+        cachedFaceUsers = users;
+        // Umbral de 0.54: óptimo para balance entre reconocimiento fiel y prevención de falsos positivos
+        cachedFaceMatcher = labeled.length ? new faceapi.FaceMatcher(labeled, 0.54) : null;
+        return { matcher: cachedFaceMatcher, users: cachedFaceUsers };
+    } catch (e) {
+        console.error("Error precargando usuarios biométricos:", e);
+        return { matcher: null, users: [] };
+    }
+}
+
+// ====== REGISTRO: ACTIVAR CÁMARA ======
 async function startRegistroFace() {
+    const btnStart = document.getElementById('btn-start-cam');
+    const statusLabel = document.getElementById('face-reg-status');
+    if (btnStart) btnStart.disabled = true;
+
+    if (!faceModelsLoaded) {
+        if (statusLabel) statusLabel.innerText = "Preparando detector biométrico...";
+        const ok = await loadFaceModels();
+        if (!ok) {
+            if (btnStart) btnStart.disabled = false;
+            return;
+        }
+    }
+
     try {
         currentStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, 
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, 
             audio: false 
         });
         const video = document.getElementById('video-registro');
@@ -132,31 +226,31 @@ async function startRegistroFace() {
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
         video.srcObject = currentStream;
-        await video.play().catch(e => console.log('Video play catch:', e));
-        
-        document.getElementById('btn-start-cam').style.display = 'none';
-        
-        // Esperar a que el video empiece a reproducirse para analizar
-        video.onloadedmetadata = () => {
-            video.play().catch(e => console.log(e));
+
+        const onVideoReady = () => {
+            if (btnStart) btnStart.style.display = 'none';
             const btnTake = document.getElementById('btn-take-foto');
-            btnTake.disabled = true; // Habilitado automáticamente al detectar rostro
-            
-            if(faceModelsLoaded) {
-                detectFaceLoop(video, 'canvas-overlay-reg', 'overlay', 'btn-take-foto');
-            } else {
-                loadFaceModels().then(() => {
-                    if (faceModelsLoaded) detectFaceLoop(video, 'canvas-overlay-reg', 'overlay', 'btn-take-foto');
-                });
-            }
+            if (btnTake) btnTake.disabled = true;
+            if (statusLabel) statusLabel.innerText = "Centra tu rostro frente a la cámara...";
+            detectFaceLoop(video, 'canvas-overlay-reg', 'overlay', 'btn-take-foto');
         };
 
+        await video.play().catch(e => console.warn('Video play:', e));
+
+        if (video.readyState >= 2) {
+            onVideoReady();
+        } else {
+            video.addEventListener('loadeddata', onVideoReady, { once: true });
+        }
+
     } catch (err) {
-        console.error(err);
-        Swal.fire('Error', 'No se pudo acceder a la cámara. Asegúrate de dar permisos.', 'error');
+        console.error("Error accediendo a cámara:", err);
+        if (btnStart) btnStart.disabled = false;
+        Swal.fire('Error', 'No se pudo acceder a la cámara. Asegúrate de dar los permisos necesarios en el navegador.', 'error');
     }
 }
 
+// Bucle de detección en vivo para Registro
 function detectFaceLoop(video, canvasId, overlayId, btnId) {
     const canvas = document.getElementById(canvasId);
     const overlay = document.getElementById(overlayId);
@@ -180,7 +274,8 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
                 faceapi.matchDimensions(canvas, displaySize);
             }
 
-            const detections = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+            const options = getFaceDetectorOptions();
+            const detections = await faceapi.detectSingleFace(video, options).withFaceLandmarks().withFaceDescriptor();
             
             const ctx = canvas ? canvas.getContext('2d') : null;
             if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -202,56 +297,59 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
                 const relY = centerY / vh;
                 const relWidth = box.width / vw;
 
-                // Validación de centrado y distancia adecuada
-                const estaCentrado = relX >= 0.28 && relX <= 0.72 && relY >= 0.22 && relY <= 0.78;
-                const tamanoAdecuado = relWidth >= 0.20 && relWidth <= 0.85;
+                const estaCentrado = relX >= 0.25 && relX <= 0.75 && relY >= 0.20 && relY <= 0.80;
+                const tamanoAdecuado = relWidth >= 0.18 && relWidth <= 0.85;
 
-                if (score >= 0.65 && estaCentrado && tamanoAdecuado) {
-                    overlay.classList.add('success');
-                    overlay.classList.remove('error', 'scanning');
-                    overlay.style.borderColor = "var(--success)";
-                    if(statusLabel) {
-                        statusLabel.innerHTML = '✅ <span style="color:#10b981; font-weight:700;">Rostro detectado correctamente.</span> Ya puedes hacer clic en <b>Escanear Rostro</b>.';
+                if (score >= 0.60 && estaCentrado && tamanoAdecuado) {
+                    if (overlay) {
+                        overlay.classList.add('success');
+                        overlay.classList.remove('error', 'scanning');
+                        overlay.style.borderColor = "var(--success)";
+                    }
+                    if (statusLabel) {
+                        statusLabel.innerHTML = '✅ <span style="color:#10b981; font-weight:700;">Rostro detectado correctamente.</span> Ya puedes presionar <b>Escanear Rostro</b>.';
                     }
                     window.currentDescriptor = detections.descriptor;
-                    if(btn) btn.disabled = false;
-                } else if (!tamanoAdecuado && relWidth < 0.20) {
-                    overlay.style.borderColor = "var(--warning)";
-                    if(statusLabel) statusLabel.innerText = "Acércate un poco más a la cámara.";
+                    if (btn) btn.disabled = false;
+                } else if (!tamanoAdecuado && relWidth < 0.18) {
+                    if (overlay) overlay.style.borderColor = "var(--warning)";
+                    if (statusLabel) statusLabel.innerText = "Acércate un poco más a la cámara.";
                 } else if (!estaCentrado) {
-                    overlay.style.borderColor = "var(--warning)";
-                    if(statusLabel) statusLabel.innerText = "Centra tu rostro dentro del círculo guía.";
+                    if (overlay) overlay.style.borderColor = "var(--warning)";
+                    if (statusLabel) statusLabel.innerText = "Centra tu rostro dentro del círculo guía.";
                 } else {
-                    overlay.style.borderColor = "var(--warning)";
-                    if(statusLabel) statusLabel.innerText = "Mejora la iluminación de tu rostro.";
+                    if (overlay) overlay.style.borderColor = "var(--warning)";
+                    if (statusLabel) statusLabel.innerText = "Mantén la mirada fija y mejora la iluminación.";
                 }
             } else {
-                overlay.classList.remove('success');
-                overlay.style.borderColor = "var(--error)";
-                if(statusLabel) statusLabel.innerText = "No se detecta un rostro claro. Centrate e ilumínate.";
+                if (overlay) {
+                    overlay.classList.remove('success');
+                    overlay.style.borderColor = "var(--error)";
+                }
+                if (statusLabel) statusLabel.innerText = "Centra tu rostro frente a la cámara...";
             }
-        } catch(err) {
+        } catch (err) {
             console.error("Error en detección facial:", err);
         } finally {
             isDetecting = false;
         }
-    }, 350); // Intervalo optimizado para evitar saturar el CPU en móviles
+    }, 280);
 }
 
+// Capturar rostro, generar descriptor y foto recortada
 function captureFace() {
-    if (faceModelsLoaded && !window.currentDescriptor) {
-        Swal.fire('Atención', 'No se ha detectado un rostro válido. Por favor enfócate bien en la cámara.', 'warning');
+    if (!window.currentDescriptor) {
+        Swal.fire('Atención', 'Aún no se ha detectado un rostro válido. Por favor enfócate bien frente a la cámara.', 'warning');
         return;
     }
     
-    if (window.currentDescriptor) {
-        profileDescriptor = Array.from(window.currentDescriptor); // Convertir Float32Array a Array JSON
-    }
+    // Guardar descriptor como Array JSON de 128 elementos
+    profileDescriptor = Array.from(window.currentDescriptor);
 
     const video = document.getElementById('video-registro');
     if (!video || !video.videoWidth) return;
 
-    // Recortar en cuadrado centrado y optimizar a 240x240 para no saturar la BD con 2000 estudiantes (~12 KB)
+    // Recortar centrado en formato cuadrado de 240x240 px (optimizado a ~12 KB)
     const size = Math.min(video.videoWidth, video.videoHeight);
     const startX = (video.videoWidth - size) / 2;
     const startY = (video.videoHeight - size) / 2;
@@ -266,23 +364,36 @@ function captureFace() {
     
     // Mostrar foto tomada
     const img = document.getElementById('img-perfil');
-    img.src = dataUrl;
-    img.style.display = 'block';
+    if (img) {
+        img.src = dataUrl;
+        img.style.display = 'block';
+    }
     
-    document.getElementById('cam-container').style.display = 'none';
-    document.getElementById('btn-take-foto').style.display = 'none';
+    const camCont = document.getElementById('cam-container');
+    if (camCont) camCont.style.display = 'none';
+    const btnTake = document.getElementById('btn-take-foto');
+    if (btnTake) btnTake.style.display = 'none';
     
-    // Guardar blob
+    // Guardar blob para envío
     canvas.toBlob((blob) => { profilePhotoBlob = blob; }, 'image/webp', 0.82);
 
-    // Limpiar stream
+    // Detener cámara e intervalo
     if (faceInterval) clearInterval(faceInterval);
-    if(currentStream) currentStream.getTracks().forEach(track => track.stop());
+    if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+
+    const statusLabel = document.getElementById('face-reg-status');
+    if (statusLabel) statusLabel.innerHTML = '🎉 <span style="color:#10b981; font-weight:700;">¡Rostro registrado con éxito!</span> Ya puedes continuar al siguiente paso.';
 }
 
 function validateStep2() {
-    if(!profilePhotoBlob) {
-        Swal.fire('Atención', 'Debes registrar tu rostro para crear el Face ID.', 'warning');
+    const email = document.getElementById('r-email').value.trim();
+    const pass = document.getElementById('r-pass').value;
+    if (!email || !pass || pass.length < 6) {
+        Swal.fire('Atención', 'Por favor ingresa un correo electrónico válido y una contraseña de al menos 6 caracteres.', 'warning');
+        return;
+    }
+    if (!profilePhotoBlob || !profileDescriptor) {
+        Swal.fire('Atención', 'Debes registrar tu rostro para crear tu Face ID.', 'warning');
         return;
     }
     nextStep(2, 3);
@@ -290,9 +401,27 @@ function validateStep2() {
 
 // ====== LOGIN FACE ID ======
 async function startFaceLogin() {
+    const btnStart = document.getElementById('btn-start-face');
+    const statusLabel = document.getElementById('face-status');
+    const overlay = document.getElementById('overlay-login');
+    
+    if (btnStart) btnStart.disabled = true;
+
+    if (!faceModelsLoaded) {
+        if (statusLabel) statusLabel.innerText = "Cargando modelos biométricos de alta velocidad...";
+        const ok = await loadFaceModels();
+        if (!ok) {
+            if (btnStart) btnStart.disabled = false;
+            return;
+        }
+    }
+
+    // Iniciar prefetch de la base de datos en segundo plano
+    prefetchFaceData();
+
     try {
         currentStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, 
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, 
             audio: false 
         });
         const video = document.getElementById('video-login');
@@ -301,25 +430,37 @@ async function startFaceLogin() {
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
         video.srcObject = currentStream;
-        await video.play().catch(e => console.log('Video play catch:', e));
-        
-        document.getElementById('btn-start-face').style.display = 'none';
-        
-        video.onloadedmetadata = () => {
-            video.play().catch(e => console.log(e));
-            if(faceModelsLoaded) {
-                document.getElementById('overlay-login').classList.add('scanning');
-                document.getElementById('face-status').innerText = "Escaneando rostro...";
-                loginDetectFaceLoop(video);
+
+        const onVideoReady = () => {
+            if (btnStart) btnStart.style.display = 'none';
+            if (overlay) {
+                overlay.classList.add('scanning');
+                overlay.classList.remove('success', 'error');
             }
+            if (statusLabel) statusLabel.innerText = "Escaneando rostro... Mantén la mirada fija.";
+            loginDetectFaceLoop(video);
         };
+
+        await video.play().catch(e => console.warn('Video play login:', e));
+
+        if (video.readyState >= 2) {
+            onVideoReady();
+        } else {
+            video.addEventListener('loadeddata', onVideoReady, { once: true });
+        }
+
     } catch (err) {
-        console.error(err);
-        Swal.fire('Error', 'No se pudo acceder a la cámara.', 'error');
+        console.error("Error cámara Face Login:", err);
+        if (btnStart) {
+            btnStart.disabled = false;
+            btnStart.style.display = 'inline-block';
+        }
+        Swal.fire('Error', 'No se pudo acceder a la cámara. Asegúrate de otorgar los permisos de cámara en tu navegador.', 'error');
     }
 }
 
-function loginDetectFaceLoop(video) {
+// Bucle de detección y emparejamiento biométrico para Login
+async function loginDetectFaceLoop(video) {
     const canvas = document.getElementById('canvas-overlay');
     let displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
     if (canvas) faceapi.matchDimensions(canvas, displaySize);
@@ -327,74 +468,83 @@ function loginDetectFaceLoop(video) {
     let attempts = 0;
     const statusLabel = document.getElementById('face-status');
     let isMatching = false;
-    
+    let isDetecting = false;
+
+    // Obtener los descriptores de la base de datos (cacheados o frescos)
+    if (statusLabel) statusLabel.innerText = "Preparando base biométrica...";
+    const { matcher, users } = await prefetchFaceData();
+
+    if (!matcher || !users || users.length === 0) {
+        Swal.fire('Aviso', 'No se encontraron usuarios aprobados con Face ID registrado en el sistema.', 'info');
+        if (statusLabel) statusLabel.innerText = "No hay rostros registrados en el sistema.";
+        stopCamera();
+        return;
+    }
+
+    if (statusLabel) statusLabel.innerText = "Ubica tu rostro en el centro del círculo...";
+
     const interval = setInterval(async () => {
-        if (isMatching) return;
+        if (isMatching || isDetecting) return;
         if (!video || video.paused || video.ended) return;
 
-        if (video.videoWidth && canvas && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
-            displaySize = { width: video.videoWidth, height: video.videoHeight };
-            faceapi.matchDimensions(canvas, displaySize);
-        }
+        isDetecting = true;
         attempts++;
-        if (attempts > 50) {
+
+        if (attempts > 40) {
             clearInterval(interval);
-            if(statusLabel) statusLabel.innerText = "Tiempo de espera agotado. Intenta con tu contraseña.";
-            const over = document.getElementById('overlay-login');
-            if (over) over.classList.remove('scanning');
+            if (statusLabel) statusLabel.innerText = "Tiempo agotado. Intenta ingresar con tu contraseña.";
             stopCamera();
+            Swal.fire('Tiempo agotado', 'No se pudo verificar el rostro a tiempo. Puedes ingresar con tu correo y contraseña.', 'info');
             return;
         }
 
         try {
-            const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
-            
-            if (detection && detection.detection.score >= 0.68) {
-                isMatching = true;
-                clearInterval(interval);
+            if (video.videoWidth && canvas && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+                displaySize = { width: video.videoWidth, height: video.videoHeight };
+                faceapi.matchDimensions(canvas, displaySize);
+            }
 
-                const over = document.getElementById('overlay-login');
-                if (over) {
-                    over.classList.remove('scanning');
-                    over.classList.add('success');
-                }
-                if (statusLabel) statusLabel.innerText = "Verificando identidad biométrica...";
-                
-                // Obtener solo usuarios aprobados con descriptor
-                const { data: users, error } = await window.db
-                    .from('usuarios')
-                    .select('id, nombre_completo, rol, estado_aprobacion, face_descriptor')
-                    .not('face_descriptor', 'is', null);
-                
-                if (error || !users || users.length === 0) {
-                    Swal.fire('Aviso', 'No hay rostros registrados en el sistema.', 'info');
-                    stopCamera();
-                    return;
+            const options = getFaceDetectorOptions();
+            const detection = await faceapi.detectSingleFace(video, options).withFaceLandmarks().withFaceDescriptor();
+
+            if (detection && detection.detection.score >= 0.60) {
+                // Dibujar en canvas
+                const ctx = canvas ? canvas.getContext('2d') : null;
+                if (ctx) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    const resized = faceapi.resizeResults(detection, displaySize);
+                    faceapi.draw.drawDetections(canvas, resized);
                 }
 
-                const labeledDescriptors = users
-                    .filter(u => Array.isArray(u.face_descriptor) && u.face_descriptor.length === 128)
-                    .map(u => new faceapi.LabeledFaceDescriptors(String(u.id), [new Float32Array(u.face_descriptor)]));
-
-                if (!labeledDescriptors.length) {
-                    Swal.fire('Aviso', 'No se encontraron descriptores faciales compatibles.', 'info');
-                    stopCamera();
-                    return;
-                }
-
-                const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.52);
-                const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+                // Comparar con base de descriptores en memoria
+                const bestMatch = matcher.findBestMatch(detection.descriptor);
+                console.log("Face Matcher resultado:", bestMatch.toString());
 
                 if (bestMatch.label !== 'unknown') {
-                    const matchedUser = users.find(u => String(u.id) === bestMatch.label);
-                    if (!matchedUser) throw new Error('Usuario no encontrado');
+                    isMatching = true;
+                    clearInterval(interval);
 
+                    const overlay = document.getElementById('overlay-login');
+                    if (overlay) {
+                        overlay.classList.remove('scanning');
+                        overlay.classList.add('success');
+                        overlay.style.borderColor = "var(--success)";
+                    }
+                    if (statusLabel) {
+                        statusLabel.innerHTML = '✅ <span style="color:#10b981; font-weight:700;">¡Identidad confirmada!</span>';
+                    }
+
+                    const matchedUser = users.find(u => String(u.id) === bestMatch.label);
+                    if (!matchedUser) throw new Error("Usuario biométrico no localizado");
+
+                    // Validar estado de aprobación
                     if (matchedUser.rol !== 'superadmin' && matchedUser.estado_aprobacion !== 'aprobado') {
-                        Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
                         stopCamera();
+                        Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
                         return;
                     }
 
+                    // Obtener perfil completo actualizado
                     const { data: fullUser } = await window.db.from('usuarios').select('*').eq('id', matchedUser.id).single();
                     const sessionData = fullUser || matchedUser;
 
@@ -403,7 +553,7 @@ function loginDetectFaceLoop(video) {
                         title: '¡Identidad Confirmada!',
                         text: `Bienvenido(a), ${sessionData.nombre_completo}`,
                         showConfirmButton: false,
-                        timer: 1500
+                        timer: 1400
                     }).then(() => {
                         localStorage.setItem('omni_user', JSON.stringify(sessionData));
                         localStorage.setItem('omni_session_time', Date.now().toString());
@@ -412,35 +562,57 @@ function loginDetectFaceLoop(video) {
                         else if (sessionData.rol === 'admin') window.location.href = 'admin.html';
                         else window.location.href = 'estudiante.html';
                     });
+                    return;
                 } else {
-                    Swal.fire('Acceso Denegado', 'Rostro no reconocido. Intenta con tu contraseña o documento.', 'error');
-                    if (statusLabel) statusLabel.innerText = "Rostro no reconocido.";
-                    stopCamera();
+                    if (statusLabel) statusLabel.innerText = "Rostro enfocado. Verificando identidad...";
                 }
             } else if (detection) {
-                if (statusLabel) statusLabel.innerText = "Centra tu mirada en la cámara...";
+                if (statusLabel) statusLabel.innerText = "Acerca tu rostro y mantén la mirada fija...";
             } else {
                 if (statusLabel) statusLabel.innerText = "Centra tu rostro frente a la cámara...";
             }
-        } catch(e) {
-            console.error("Error validando rostro", e);
-            Swal.fire('Error', 'No se pudo conectar con la base de datos.', 'error');
-            stopCamera();
+        } catch (err) {
+            console.error("Error en proceso de verificación biométrica:", err);
+        } finally {
+            isDetecting = false;
         }
-    }, 450);
+    }, 280);
 }
 
+// Detener cámara y restablecer vista
 function stopCamera() {
-    if(currentStream) {
+    if (faceInterval) {
+        clearInterval(faceInterval);
+        faceInterval = null;
+    }
+    if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
     }
     const btn = document.getElementById('btn-start-face');
-    if(btn) btn.style.display = 'inline-block';
-    
-    const overlay = document.getElementById('overlay-login');
-    if(overlay) {
-        overlay.classList.remove('scanning');
-        overlay.classList.remove('success');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.display = 'inline-block';
+    }
+    const btnCam = document.getElementById('btn-start-cam');
+    if (btnCam) {
+        btnCam.disabled = false;
+        btnCam.style.display = 'inline-block';
+    }
+    const overlay = document.getElementById('overlay-login') || document.getElementById('overlay');
+    if (overlay) {
+        overlay.classList.remove('scanning', 'success');
+        overlay.style.borderColor = "";
+    }
+    const canvasLogin = document.getElementById('canvas-overlay');
+    if (canvasLogin) {
+        const ctx = canvasLogin.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvasLogin.width, canvasLogin.height);
+    }
+    const canvasReg = document.getElementById('canvas-overlay-reg');
+    if (canvasReg) {
+        const ctx = canvasReg.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvasReg.width, canvasReg.height);
     }
 }
 
