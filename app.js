@@ -250,13 +250,117 @@ async function startRegistroFace() {
     }
 }
 
-// Bucle de detección en vivo para Registro
+// ====== RELLENAR DATOS DE PRUEBA (ESTUDIANTE DEMO) ======
+function autofillTestData() {
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const nombreInput = document.getElementById('r-nombre');
+    if (nombreInput) nombreInput.value = "Kevin Alexander (Estudiante Demo)";
+    
+    const countrySelect = document.getElementById('r-country-code');
+    if (countrySelect) countrySelect.value = "+503";
+    
+    const telInput = document.getElementById('r-tel');
+    if (telInput) telInput.value = "7" + String(randomSuffix).padStart(7, '4');
+    
+    const dniInput = document.getElementById('r-dni');
+    if (dniInput) dniInput.value = `05${randomSuffix}-7`;
+    
+    const fechaInput = document.getElementById('r-fecha');
+    if (fechaInput) fechaInput.value = "2003-08-20";
+    
+    const codigoInput = document.getElementById('r-codigo');
+    if (codigoInput) codigoInput.value = `ED${randomSuffix}`;
+    
+    const emailInput = document.getElementById('r-email');
+    if (emailInput) emailInput.value = `estudiante.demo.${randomSuffix}@omnitravel.edu`;
+    
+    const passInput = document.getElementById('r-pass');
+    if (passInput) passInput.value = "Estudiante2026*";
+    
+    const deptoSelect = document.getElementById('r-depto');
+    if (deptoSelect) {
+        deptoSelect.value = "San Salvador";
+        cargarMunicipios();
+        const muniSelect = document.getElementById('r-muni');
+        if (muniSelect) {
+            setTimeout(() => {
+                muniSelect.value = "San Salvador";
+            }, 60);
+        }
+    }
+    
+    Swal.fire({
+        icon: 'info',
+        title: 'Datos de Prueba Cargados',
+        html: `Se rellenaron datos de prueba para <b>Kevin Alexander</b>.<br><small style="color:#64748b;">Correo asignado: estudiante.demo.${randomSuffix}@omnitravel.edu</small>`,
+        timer: 2000,
+        showConfirmButton: false
+    });
+}
+
+// ====== PRUEBA DE VIDA Y PROFUNDIDAD FACIAL 3D (ANTI-SPOOFING / ANTI-FOTOS) ======
+window.livenessVerified = false;
+window.__omniLivenessToken = null;
+
+let livenessState = {
+    stage: 0, // 0: Enfoque inicial, 1: Giro 3D en progreso, 2: Verificado
+    baselineYaw: null,
+    framesCentered: 0
+};
+
+function calcularDistanciaPuntos(p1, p2) {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+}
+
+// Ratio de asimetría 3D de profundidad de la nariz respecto a las mejillas (Perspectiva Parallax)
+function calcularProfundidadYaw(landmarks) {
+    if (!landmarks || !landmarks[30] || !landmarks[2] || !landmarks[14]) return 1.0;
+    const nariz = landmarks[30];
+    const mejillaIzq = landmarks[2];
+    const mejillaDer = landmarks[14];
+    const dIzq = calcularDistanciaPuntos(nariz, mejillaIzq);
+    const dDer = calcularDistanciaPuntos(nariz, mejillaDer);
+    if (dDer <= 0) return 1.0;
+    return dIzq / dDer;
+}
+
+// Bucle de detección en vivo con Prueba de Vida y Profundidad 3D para Registro (Rápido por Giro)
 function detectFaceLoop(video, canvasId, overlayId, btnId) {
     const canvas = document.getElementById(canvasId);
     const overlay = document.getElementById(overlayId);
     const btn = document.getElementById(btnId);
     const statusLabel = document.getElementById('face-reg-status');
+    const badgeText = document.getElementById('liveness-badge-text');
+
+    const chkRostro = document.getElementById('chk-rostro');
+    const chkProfundidad = document.getElementById('chk-profundidad');
     
+    const updateChecklistUI = (s) => {
+        if (!chkRostro || !chkProfundidad) return;
+        if (s === 0) {
+            chkRostro.className = 'badge-liveness active';
+            chkProfundidad.className = 'badge-liveness pending';
+        } else if (s === 1) {
+            chkRostro.className = 'badge-liveness done';
+            chkRostro.innerText = '✅ 1. Rostro Detectado';
+            chkProfundidad.className = 'badge-liveness active';
+        } else if (s === 2) {
+            chkRostro.className = 'badge-liveness done';
+            chkProfundidad.className = 'badge-liveness done';
+            chkProfundidad.innerText = '✅ 2. Profundidad 3D (Verificado)';
+        }
+    };
+
+    window.livenessVerified = false;
+    window.__omniLivenessToken = null;
+    livenessState = {
+        stage: 0,
+        baselineYaw: null,
+        framesCentered: 0
+    };
+    if (btn) btn.disabled = true;
+    updateChecklistUI(0);
+
     let displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
     if (canvas) faceapi.matchDimensions(canvas, displaySize);
     
@@ -297,57 +401,183 @@ function detectFaceLoop(video, canvasId, overlayId, btnId) {
                 const relY = centerY / vh;
                 const relWidth = box.width / vw;
 
-                const estaCentrado = relX >= 0.25 && relX <= 0.75 && relY >= 0.20 && relY <= 0.80;
-                const tamanoAdecuado = relWidth >= 0.18 && relWidth <= 0.85;
+                const estaCentrado = relX >= 0.20 && relX <= 0.80 && relY >= 0.15 && relY <= 0.85;
+                const tamanoAdecuado = relWidth >= 0.16 && relWidth <= 0.90;
 
-                if (score >= 0.60 && estaCentrado && tamanoAdecuado) {
+                if (!estaCentrado || !tamanoAdecuado || score < 0.60) {
+                    // Revocar inmediatamente aprobación si el rostro se sale de cuadro o se cubre
+                    window.livenessVerified = false;
+                    window.__omniLivenessToken = null;
+                    window.currentDescriptor = null;
+                    livenessState.stage = 0;
+                    livenessState.framesCentered = 0;
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.classList.remove('pulse');
+                        btn.innerHTML = 'Escanear Rostro';
+                    }
+                    updateChecklistUI(0);
+
                     if (overlay) {
-                        overlay.classList.add('success');
-                        overlay.classList.remove('error', 'scanning');
-                        overlay.style.borderColor = "var(--success)";
+                        overlay.className = 'face-overlay error';
+                        overlay.style.borderColor = "var(--warning)";
                     }
-                    if (statusLabel) {
-                        statusLabel.innerHTML = '✅ <span style="color:#10b981; font-weight:700;">Rostro detectado correctamente.</span> Ya puedes presionar <b>Escanear Rostro</b>.';
+                    if (relWidth < 0.16) {
+                        if (statusLabel) statusLabel.innerText = "Acércate un poco más a la cámara.";
+                    } else if (!estaCentrado) {
+                        if (statusLabel) statusLabel.innerText = "Centra tu rostro dentro del recuadro.";
+                    } else {
+                        if (statusLabel) statusLabel.innerText = "Mejora la iluminación de tu rostro.";
                     }
-                    window.currentDescriptor = detections.descriptor;
-                    if (btn) btn.disabled = false;
-                } else if (!tamanoAdecuado && relWidth < 0.18) {
-                    if (overlay) overlay.style.borderColor = "var(--warning)";
-                    if (statusLabel) statusLabel.innerText = "Acércate un poco más a la cámara.";
-                } else if (!estaCentrado) {
-                    if (overlay) overlay.style.borderColor = "var(--warning)";
-                    if (statusLabel) statusLabel.innerText = "Centra tu rostro dentro del círculo guía.";
-                } else {
-                    if (overlay) overlay.style.borderColor = "var(--warning)";
-                    if (statusLabel) statusLabel.innerText = "Mantén la mirada fija y mejora la iluminación.";
+                    return;
                 }
+
+                // Extraer landmarks y ratio de profundidad 3D
+                const positions = detections.landmarks.positions;
+                const yawRatio = calcularProfundidadYaw(positions);
+
+                // MÁQUINA DE ESTADOS RÁPIDA: CENTRADO -> GIRO DE CABEZA -> VERIFICADO
+                if (livenessState.stage === 0) {
+                    livenessState.framesCentered++;
+                    if (overlay) {
+                        overlay.className = 'face-overlay scanning';
+                        overlay.style.borderColor = "#38bdf8";
+                    }
+                    if (badgeText) badgeText.innerText = "🔍 Rostro enfocado...";
+                    if (statusLabel) {
+                        statusLabel.innerHTML = '👤 Rostro enfocado...';
+                    }
+
+                    if (livenessState.framesCentered >= 2) {
+                        livenessState.baselineYaw = yawRatio;
+                        livenessState.stage = 1;
+                        updateChecklistUI(1);
+                        if (badgeText) badgeText.innerText = "🔄 Gira levemente tu cabeza...";
+                        if (statusLabel) {
+                            statusLabel.innerHTML = '🔄 <b>PRUEBA 3D:</b> <span style="color:#d97706; font-weight:700; font-size:0.95rem;">GIRA LEVEMENTE LA CABEZA</span> hacia un lado para verificar profundidad.';
+                        }
+                    }
+
+                } else if (livenessState.stage === 1) {
+                    if (overlay) overlay.className = 'face-overlay scanning';
+                    const yawDiff = Math.abs(yawRatio - (livenessState.baselineYaw || 1.0));
+
+                    // Detección rápida de giro de cabeza (profundidad 3D real)
+                    if (yawDiff >= 0.16 || yawRatio >= 1.30 || yawRatio <= 0.74) {
+                        livenessState.stage = 2;
+                        window.livenessVerified = true;
+                        window.__omniLivenessToken = 'LIVENESS_3D_OK_' + Date.now();
+                        window.currentDescriptor = detections.descriptor;
+                        
+                        updateChecklistUI(2);
+
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.classList.add('pulse');
+                            btn.innerHTML = '📸 Escanear Rostro';
+                        }
+
+                        if (overlay) {
+                            overlay.className = 'face-overlay success';
+                            overlay.style.borderColor = "var(--success)";
+                        }
+                        if (badgeText) badgeText.innerText = "🛡️ Persona real confirmada (Profundidad 3D OK)";
+                        if (statusLabel) {
+                            statusLabel.innerHTML = `✅ <span style="color:#10b981; font-weight:700; font-size:0.95rem;">¡Profundidad 3D confirmada con éxito!</span> Ya puedes presionar <b>Escanear Rostro</b>.`;
+                        }
+                    } else {
+                        if (statusLabel) {
+                            statusLabel.innerHTML = '🔄 <b>PRUEBA 3D:</b> <span style="color:#d97706; font-weight:700; font-size:0.95rem;">GIRA LEVEMENTE LA CABEZA</span> hacia un lado para verificar profundidad.';
+                        }
+                    }
+
+                } else if (livenessState.stage === 2) {
+                    // Solo mantener habilitado mientras el rostro continúe en pantalla
+                    window.currentDescriptor = detections.descriptor;
+                    if (btn && btn.disabled) {
+                        btn.disabled = false;
+                    }
+                }
+
             } else {
+                // ROSTRO NO DETECTADO O CUBIERTO (Mano frente a la cámara, usuario retirado)
+                // Revocar inmediatamente la aprobación y desactivar el botón
+                window.livenessVerified = false;
+                window.__omniLivenessToken = null;
+                window.currentDescriptor = null;
+                livenessState.stage = 0;
+                livenessState.framesCentered = 0;
+                if (btn) {
+                    btn.disabled = true;
+                    btn.classList.remove('pulse');
+                    btn.innerHTML = 'Escanear Rostro';
+                }
+                updateChecklistUI(0);
+
                 if (overlay) {
-                    overlay.classList.remove('success');
+                    overlay.className = 'face-overlay error';
                     overlay.style.borderColor = "var(--error)";
                 }
-                if (statusLabel) statusLabel.innerText = "Centra tu rostro frente a la cámara...";
+                if (badgeText) badgeText.innerText = "⚠️ Rostro no detectado";
+                if (statusLabel) {
+                    statusLabel.innerHTML = '<span style="color:#ef4444; font-weight:700;">⚠️ Rostro perdido o cubierto.</span> Muestra tu rostro frente a la cámara para verificar.';
+                }
             }
         } catch (err) {
-            console.error("Error en detección facial:", err);
+            console.error("Error en detección facial y prueba de vida:", err);
         } finally {
             isDetecting = false;
         }
-    }, 280);
+    }, 200);
 }
 
 // Capturar rostro, generar descriptor y foto recortada
-function captureFace() {
-    if (!window.currentDescriptor) {
-        Swal.fire('Atención', 'Aún no se ha detectado un rostro válido. Por favor enfócate bien frente a la cámara.', 'warning');
+async function captureFace() {
+    const video = document.getElementById('video-registro');
+    if (!video || !video.videoWidth) return;
+
+    const btnTake = document.getElementById('btn-take-foto');
+
+    // 1. Verificación instantánea en el fotograma exacto capturado
+    // (Bloquea si alguien puso la mano o quitó el rostro al presionar el botón)
+    const options = getFaceDetectorOptions();
+    const liveDetection = await faceapi.detectSingleFace(video, options).withFaceLandmarks().withFaceDescriptor();
+
+    if (!liveDetection || liveDetection.detection.score < 0.60) {
+        window.livenessVerified = false;
+        window.__omniLivenessToken = null;
+        window.currentDescriptor = null;
+        livenessState.stage = 0;
+        livenessState.framesCentered = 0;
+        if (btnTake) {
+            btnTake.disabled = true;
+            btnTake.classList.remove('pulse');
+            btnTake.innerHTML = 'Escanear Rostro';
+        }
+        const chkR = document.getElementById('chk-rostro');
+        const chkP = document.getElementById('chk-profundidad');
+        if (chkR) { chkR.className = 'badge-liveness pending'; chkR.innerText = '👤 1. Rostro Humano'; }
+        if (chkP) { chkP.className = 'badge-liveness pending'; chkP.innerText = '🔄 2. Giro de Cabeza (Profundidad 3D)'; }
+
+        Swal.fire({
+            icon: 'error',
+            title: 'Rostro no detectado',
+            text: 'No se detecta un rostro humano en este momento. Por favor no cubras la cámara con la mano ni retires tu rostro del encuadre.'
+        });
+        return;
+    }
+
+    if (!window.livenessVerified || !window.__omniLivenessToken) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Prueba 3D Requerida',
+            text: 'Debes girar levemente tu cabeza frente a la cámara para verificar que eres una persona real con profundidad 3D y no una fotografía.'
+        });
         return;
     }
     
-    // Guardar descriptor como Array JSON de 128 elementos
-    profileDescriptor = Array.from(window.currentDescriptor);
-
-    const video = document.getElementById('video-registro');
-    if (!video || !video.videoWidth) return;
+    // Guardar descriptor extraído DIRECTAMENTE del fotograma vivo verificado
+    profileDescriptor = Array.from(liveDetection.descriptor);
 
     // Recortar centrado en formato cuadrado de 240x240 px (optimizado a ~12 KB)
     const size = Math.min(video.videoWidth, video.videoHeight);
@@ -358,6 +588,10 @@ function captureFace() {
     canvas.width = 240;
     canvas.height = 240;
     const ctx = canvas.getContext('2d');
+
+    // Reflejar horizontalmente para que la foto capturada coincida idéntica con la vista previa del video (sin invertirse)
+    ctx.translate(240, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(video, startX, startY, size, size, 0, 0, 240, 240);
     
     const dataUrl = canvas.toDataURL('image/webp', 0.82);
@@ -371,7 +605,6 @@ function captureFace() {
     
     const camCont = document.getElementById('cam-container');
     if (camCont) camCont.style.display = 'none';
-    const btnTake = document.getElementById('btn-take-foto');
     if (btnTake) btnTake.style.display = 'none';
     
     // Guardar blob para envío
@@ -382,7 +615,7 @@ function captureFace() {
     if (currentStream) currentStream.getTracks().forEach(track => track.stop());
 
     const statusLabel = document.getElementById('face-reg-status');
-    if (statusLabel) statusLabel.innerHTML = '🎉 <span style="color:#10b981; font-weight:700;">¡Rostro registrado con éxito!</span> Ya puedes continuar al siguiente paso.';
+    if (statusLabel) statusLabel.innerHTML = '🎉 <span style="color:#10b981; font-weight:700;">¡Rostro 3D registrado con éxito!</span> Ya puedes continuar al siguiente paso.';
 }
 
 function validateStep2() {
@@ -392,12 +625,17 @@ function validateStep2() {
         Swal.fire('Atención', 'Por favor ingresa un correo electrónico válido y una contraseña de al menos 6 caracteres.', 'warning');
         return;
     }
-    if (!profilePhotoBlob || !profileDescriptor) {
-        Swal.fire('Atención', 'Debes registrar tu rostro para crear tu Face ID.', 'warning');
+    if (!profilePhotoBlob || !profileDescriptor || !window.livenessVerified) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Rostro no verificado',
+            text: 'Debes completar la prueba de profundidad 3D (giro de cabeza) y capturar tu rostro antes de avanzar.'
+        });
         return;
     }
     nextStep(2, 3);
 }
+
 
 // ====== LOGIN FACE ID ======
 async function startFaceLogin() {

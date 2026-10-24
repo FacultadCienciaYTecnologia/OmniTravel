@@ -849,9 +849,37 @@ async function resolverSolicitud(p, decision) {
         : (info.tipo === 'abordaje' ? 'rechazo:' + info.nombre : 'rechazada');
     await window.db.from('paradas_intermitentes').update({ estado: nuevoEstado }).eq('id', p.id);
     if (decision === 'aprobada' && info.tipo === 'abordaje') {
-        await window.db.from('usuarios').update({
-            parada_id: JSON.stringify({ lat: p.lat, lng: p.lng, nombre: info.nombre || 'Punto sobre la ruta', origen: 'otro' })
-        }).eq('id', p.usuario_id);
+        const datos = { lat: p.lat, lng: p.lng, nombre: info.nombre || 'Punto sobre la ruta', origen: 'otro' };
+        const guardadoJson = JSON.stringify(datos);
+        const { error: errDirecto } = await window.db.from('usuarios').update({ parada_id: guardadoJson }).eq('id', p.usuario_id);
+        if (errDirecto) {
+            // Si la columna es UUID, buscar o insertar en tabla paradas
+            let paradaId = null;
+            const { data: paradasViaje } = await window.db.from('paradas').select('id, nombre, latitud, longitud').eq('viaje_id', p.viaje_id);
+            if (paradasViaje && paradasViaje.length > 0) {
+                const enc = paradasViaje.find((x) => {
+                    const matchNombre = x.nombre && info.nombre && x.nombre.trim().toLowerCase() === info.nombre.trim().toLowerCase();
+                    const latP = Number(x.latitud);
+                    const lngP = Number(x.longitud);
+                    const matchCoord = isFinite(latP) && isFinite(lngP) && distanciaMetros(latP, lngP, p.lat, p.lng) <= 80;
+                    return matchNombre || matchCoord;
+                });
+                if (enc) paradaId = enc.id;
+            }
+            if (!paradaId) {
+                const { data: nParada } = await window.db.from('paradas').insert([{
+                    viaje_id: p.viaje_id,
+                    nombre: info.nombre || 'Parada aprobada',
+                    latitud: p.lat,
+                    longitud: p.lng,
+                    detalle: guardadoJson
+                }]).select('id').single();
+                if (nParada) paradaId = nParada.id;
+            }
+            if (paradaId) {
+                await window.db.from('usuarios').update({ parada_id: paradaId }).eq('id', p.usuario_id);
+            }
+        }
     }
     if (decision === 'aprobada') {
         await agregarParadaAprobadaAViaje(p.viaje_id, {

@@ -405,6 +405,34 @@ button:disabled, .btn:disabled {
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
 }
 
+.badge-liveness {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    transition: all 0.25s ease;
+}
+.badge-liveness.pending {
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+}
+.badge-liveness.active {
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #60a5fa;
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.25);
+    animation: pulse 1.5s infinite;
+}
+.badge-liveness.done {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #34d399;
+}
+
 div:where(.swal2-container) div:where(.swal2-popup) {
     border-radius: 2px !important;
     font-family: 'Source Sans 3', 'Segoe UI', sans-serif !important;

@@ -33,9 +33,34 @@ function leerParada(paradaId, ruta) {
     try {
         const c = typeof paradaId === 'string' ? JSON.parse(paradaId) : paradaId;
         if (c && typeof c.lat === 'number' && typeof c.lng === 'number') return c;
-    } catch (e) { /* índice antiguo */ }
-    const idx = parseInt(paradaId, 10);
-    if (!isNaN(idx) && ruta && ruta[idx]) return ruta[idx];
+    } catch (e) { /* índice antiguo o UUID */ }
+
+    // Si es un UUID (longitud 36 con guiones)
+    if (typeof paradaId === 'string' && /^[0-9a-fA-F-]{36}$/.test(paradaId.trim())) {
+        const idTrim = paradaId.trim();
+        if (window.cacheParadasMap && window.cacheParadasMap[idTrim]) {
+            return window.cacheParadasMap[idTrim];
+        }
+        if (Array.isArray(window.bibliotecaParadas)) {
+            const b = window.bibliotecaParadas.find(x => x.id === idTrim);
+            if (b) return { lat: Number(b.latitud || b.lat), lng: Number(b.longitud || b.lng), nombre: b.nombre, origen: 'ruta' };
+        }
+        try {
+            const u = JSON.parse(localStorage.getItem('omni_user') || '{}');
+            if (u && u.parada_id === idTrim && u.parada_detalle) {
+                return u.parada_detalle;
+            }
+        } catch(err) {}
+        if (Array.isArray(ruta)) {
+            const puntoRuta = ruta.find(p => p && p.id === idTrim);
+            if (puntoRuta) return puntoRuta;
+        }
+    }
+
+    if (/^\d+$/.test(String(paradaId).trim())) {
+        const idx = parseInt(paradaId, 10);
+        if (!isNaN(idx) && ruta && ruta[idx]) return ruta[idx];
+    }
     return null;
 }
 
@@ -210,6 +235,32 @@ function insertarPuntoEnRuta(puntos, nuevoPunto) {
 async function agregarParadaAprobadaAViaje(viajeId, paradaAprobada) {
     if (!viajeId || !paradaAprobada || !window.db) return false;
     try {
+        // Asegurar que exista en public.paradas si la tabla existe
+        try {
+            const { data: existente } = await window.db.from('paradas')
+                .select('id, nombre')
+                .eq('viaje_id', viajeId);
+            const yaEsta = existente && existente.some((x) => {
+                return x.nombre && paradaAprobada.nombre && x.nombre.trim().toLowerCase() === paradaAprobada.nombre.trim().toLowerCase();
+            });
+            if (!yaEsta) {
+                await window.db.from('paradas').insert([{
+                    viaje_id: viajeId,
+                    nombre: paradaAprobada.nombre || 'Parada aprobada',
+                    latitud: Number(paradaAprobada.lat),
+                    longitud: Number(paradaAprobada.lng),
+                    detalle: JSON.stringify({
+                        lat: Number(paradaAprobada.lat),
+                        lng: Number(paradaAprobada.lng),
+                        nombre: paradaAprobada.nombre || 'Parada aprobada',
+                        origen: 'ruta'
+                    })
+                }]);
+            }
+        } catch (errParadas) {
+            console.warn('Nota: sincronización con tabla paradas:', errParadas);
+        }
+
         const { data: viaje, error } = await window.db.from('viajes').select('id, ruta').eq('id', viajeId).single();
         if (error || !viaje) return false;
         const rutaActual = puntosDeRuta(viaje.ruta);

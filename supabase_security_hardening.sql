@@ -223,3 +223,32 @@ CREATE INDEX IF NOT EXISTS idx_usuarios_viaje_id ON public.usuarios(viaje_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_transporte_id ON public.usuarios(transporte_id);
 CREATE INDEX IF NOT EXISTS idx_gps_logs_transporte ON public.gps_logs(transporte_id, actualizado_en DESC);
 CREATE INDEX IF NOT EXISTS idx_paradas_viaje ON public.paradas_intermitentes(viaje_id);
+
+-- ==============================================================================
+-- 6. TABLA PARADAS Y COMPATIBILIDAD CON usuarios.parada_id
+-- ==============================================================================
+-- El sistema OmniTravel admite tanto parada_id como UUID (referenciando public.paradas)
+-- como formato JSON texto. Si desea máxima compatibilidad y flexibilidad:
+-- ALTER TABLE public.usuarios DROP CONSTRAINT IF EXISTS usuarios_parada_id_fkey;
+-- ALTER TABLE public.usuarios ALTER COLUMN parada_id TYPE text;
+
+CREATE TABLE IF NOT EXISTS public.paradas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    viaje_id UUID REFERENCES public.viajes(id) ON DELETE CASCADE,
+    nombre TEXT NOT NULL,
+    hora_estimada TEXT,
+    latitud NUMERIC,
+    longitud NUMERIC,
+    detalle TEXT,
+    creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.paradas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Lectura publica paradas" ON public.paradas;
+DROP POLICY IF EXISTS "Insertar paradas" ON public.paradas;
+DROP POLICY IF EXISTS "Actualizar paradas" ON public.paradas;
+
+CREATE POLICY "Lectura publica paradas" ON public.paradas FOR SELECT USING (true);
+CREATE POLICY "Insertar paradas" ON public.paradas FOR INSERT WITH CHECK (true);
+CREATE POLICY "Actualizar paradas" ON public.paradas FOR UPDATE USING (true) WITH CHECK (true);
+

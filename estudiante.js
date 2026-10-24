@@ -83,6 +83,28 @@ async function loadEstudianteDashboard(skipFetch = false) {
             window.currentViajeId = viaje.id;
             window.currentViajeData = viaje; // Guardar datos para validaciones GPS
 
+            // Precargar paradas registradas en la base de datos para este viaje
+            if (!window.cacheParadasMap) window.cacheParadasMap = {};
+            try {
+                const { data: paradasBd } = await window.db.from('paradas').select('*').eq('viaje_id', viaje.id);
+                if (paradasBd && Array.isArray(paradasBd)) {
+                    paradasBd.forEach((pb) => {
+                        let det = null;
+                        if (pb.detalle) {
+                            try { det = typeof pb.detalle === 'string' ? JSON.parse(pb.detalle) : pb.detalle; } catch(e){}
+                        }
+                        window.cacheParadasMap[pb.id] = det || {
+                            lat: Number(pb.latitud),
+                            lng: Number(pb.longitud),
+                            nombre: pb.nombre,
+                            origen: 'ruta'
+                        };
+                    });
+                }
+            } catch (errP) {
+                console.warn('Nota: precarga de paradas en caché:', errP);
+            }
+
             document.getElementById('v-titulo').innerText = viaje.titulo;
             document.getElementById('v-fecha').innerText = `Fecha de Salida: ${new Date(viaje.fecha_salida).toLocaleString()}`;
             cargarEvidencia();
@@ -719,7 +741,11 @@ function llenarSelectorParadas(puntos) {
     lista.forEach((r) => {
         const nombre = r.nombre || 'Parada';
         const valor = encodeURIComponent(JSON.stringify({ lat: r.lat, lng: r.lng, nombre: nombre, origen: 'ruta' }));
-        const selected = actual && actual.origen !== 'otro' && actual.lat === r.lat && actual.lng === r.lng ? ' selected' : '';
+        const esMisma = actual && (
+            (Math.abs(Number(actual.lat) - Number(r.lat)) < 0.0002 && Math.abs(Number(actual.lng) - Number(r.lng)) < 0.0002) ||
+            (actual.nombre && r.nombre && actual.nombre.trim().toLowerCase() === r.nombre.trim().toLowerCase())
+        );
+        const selected = esMisma ? ' selected' : '';
         selectParadas.innerHTML += `<option value="${valor}"${selected}>${escaparHtml(nombre)}</option>`;
     });
     selectParadas.innerHTML += '<option value="otro">Otro punto sobre la ruta</option>';
@@ -789,14 +815,70 @@ async function guardarParada() {
 
     try {
         const datos = JSON.parse(decodeURIComponent(valor));
-        const guardado = JSON.stringify(datos);
-        const { error } = await window.db.from('usuarios').update({ parada_id: guardado }).eq('id', session.id);
-        if (error) throw error;
-        session.parada_id = guardado;
+        const guardadoJson = JSON.stringify(datos);
+        let paradaIdFinal = guardadoJson;
+
+        // 1. Intentar actualizar directamente como JSON (por si la columna usuarios.parada_id es TEXT)
+        const { error: errDirecto } = await window.db.from('usuarios').update({ parada_id: guardadoJson }).eq('id', session.id);
+
+        if (errDirecto) {
+            console.warn('Actualización directa con JSON falló (columna es UUID). Resolviendo mediante tabla paradas...', errDirecto);
+            // La columna es UUID con FK a public.paradas(id)
+            let paradaId = null;
+
+            // Buscar si ya existe la parada en public.paradas para este viaje
+            const { data: paradasViaje } = await window.db.from('paradas')
+                .select('id, nombre, latitud, longitud')
+                .eq('viaje_id', window.currentViajeId);
+
+            if (paradasViaje && paradasViaje.length > 0) {
+                const encontrada = paradasViaje.find((p) => {
+                    const matchNombre = p.nombre && datos.nombre && p.nombre.trim().toLowerCase() === datos.nombre.trim().toLowerCase();
+                    const latP = Number(p.latitud);
+                    const lngP = Number(p.longitud);
+                    const matchCoord = isFinite(latP) && isFinite(lngP) && distanciaMetros(latP, lngP, datos.lat, datos.lng) <= 80;
+                    return matchNombre || matchCoord;
+                });
+                if (encontrada) paradaId = encontrada.id;
+            }
+
+            // Si aún no está registrada en public.paradas, insertarla
+            if (!paradaId) {
+                const { data: nuevaParada, error: errInsert } = await window.db.from('paradas').insert([{
+                    viaje_id: window.currentViajeId,
+                    nombre: datos.nombre || 'Parada',
+                    latitud: datos.lat,
+                    longitud: datos.lng,
+                    detalle: guardadoJson
+                }]).select('id').single();
+
+                if (errInsert) {
+                    console.error('Error insertando en tabla paradas:', errInsert);
+                    throw errDirecto;
+                }
+                if (nuevaParada) paradaId = nuevaParada.id;
+            }
+
+            if (paradaId) {
+                const { error: errUuid } = await window.db.from('usuarios').update({ parada_id: paradaId }).eq('id', session.id);
+                if (errUuid) throw errUuid;
+                paradaIdFinal = paradaId;
+
+                if (!window.cacheParadasMap) window.cacheParadasMap = {};
+                window.cacheParadasMap[paradaId] = datos;
+            } else {
+                throw errDirecto;
+            }
+        }
+
+        session.parada_id = paradaIdFinal;
+        session.parada_detalle = datos;
         localStorage.setItem('omni_user', JSON.stringify(session));
+
         Swal.fire('Parada confirmada', datos.nombre || 'Parada registrada.', 'success');
         loadEstudianteDashboard(true);
     } catch (e) {
+        console.error('Error al guardar parada:', e);
         Swal.fire('No se guardó', 'No se pudo confirmar la parada.', 'error');
     }
 }

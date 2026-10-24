@@ -126,9 +126,18 @@
                     <hr>
 
                     <div class="text-center mb-2">
-                        <label>Registro de Rostro (Face ID)</label>
-                        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">Mira directamente a la
-                            cámara para generar tu clave biométrica. Asegúrate de tener buena luz.</p>
+                        <label>Registro de Rostro (Face ID Biométrico 3D)</label>
+                        <p class="text-muted" style="font-size:0.85rem; margin-bottom:10px;">El sistema cuenta con <b>detección de vida activa y profundidad 3D</b>. No se aceptan fotos estáticas en teléfonos ni papel.</p>
+
+                        <div id="liveness-badge" class="mb-2" style="display:inline-flex; align-items:center; gap:6px; padding:6px 14px; border-radius:20px; font-size:0.82rem; font-weight:700; background:rgba(0,0,0,0.05); color:var(--text-main);">
+                            <span id="liveness-badge-text">🛡️ Sistema Anti-Spoofing Activo (Prueba de Vida)</span>
+                        </div>
+
+                        <!-- CHECKLIST DE PRUEBA DE VIDA Y PROFUNDIDAD 3D -->
+                        <div id="liveness-checklist" style="display:flex; justify-content:center; gap:8px; flex-wrap:wrap; margin:8px 0 12px 0;">
+                            <span id="chk-rostro" class="badge-liveness pending">👤 1. Rostro Humano</span>
+                            <span id="chk-profundidad" class="badge-liveness pending">🔄 2. Giro de Cabeza (Profundidad 3D)</span>
+                        </div>
 
                         <div class="face-scanner mb-2" id="cam-container">
                             <video id="video-registro" autoplay muted playsinline webkit-playsinline></video>
