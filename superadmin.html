@@ -20,6 +20,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
     
     <style>
         .main-content { overflow-y: auto; }
@@ -301,7 +303,7 @@
                         <h3 class="mb-2">Visor de Croquis (Asignaciones)</h3>
                         <button class="btn btn-outline btn-auto" onclick="document.getElementById('admin-croquis-container').style.display='none'">Cerrar</button>
                     </div>
-                    <p class="text-muted mb-3">Puede apartar su asiento sin esperar el horario de los estudiantes. El frente del vehículo queda a la izquierda.</p>
+                    <p class="text-muted mb-3">Puede apartar su asiento sin esperar el horario de los estudiantes. En el bus y en el microbús el frente queda arriba. En la moto, a la izquierda.</p>
                     
                     <div class="grid grid-2">
                         <div>
@@ -337,15 +339,12 @@
                         <select id="asig-filtro-transporte" onchange="pintarAsignacion(true)" style="padding:6px 12px; border:1px solid var(--line); border-radius:4px; max-width:340px; font-size:0.95rem; font-weight:600;">
                             <option value="todos">Todos los inscritos</option>
                             <option value="bus_1">Bus 1</option>
-                            <option value="bus_2">Bus 2 (Todos)</option>
-                            <option value="bus_2_sentados">Bus 2 - Sentados (50)</option>
-                            <option value="bus_2_parados">Bus 2 - De pie / Parados (4)</option>
+                            <option value="bus_2">Bus 2</option>
                             <option value="microbus">Microbús</option>
                             <option value="motos">Motocicletas</option>
                             <option value="sin_unidad">Sin asignar a transporte</option>
                         </select>
                     </div>
-                    <div id="asig-apartado-parados" class="mb-3" style="display:none;"></div>
                     <div id="asig-resumen" class="mb-3"></div>
                     <div class="table-responsive">
                         <table>
@@ -370,10 +369,13 @@
                 <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
                         <div>
-                            <h3 class="mb-1">Control de Asistencia por Unidad</h3>
-                            <p class="text-muted" style="margin:0;">Supervisión en tiempo real de pasajeros a bordo (verde) y aún no dentro (rojo), separados por transporte.</p>
+                            <h3 class="mb-1">Control de asistencia</h3>
+                            <p class="text-muted" style="margin:0;">Vea quién va a bordo por transporte o agrupado por la parada en la que indicó que se sube. Desde cualquiera de las dos vistas puede marcar la asistencia.</p>
                         </div>
-                        <button type="button" class="btn btn-outline btn-auto" onclick="cargarControlAsistencia(true)">🔄 Actualizar Asistencia</button>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-outline btn-auto" onclick="cargarControlAsistencia(true)">Actualizar asistencia</button>
+                            <button type="button" class="btn btn-primary btn-auto" onclick="descargarPdfAsistencia()">Descargar PDF para imprimir</button>
+                        </div>
                     </div>
                     
                     <div class="grid grid-2 mt-3 mb-3">
@@ -390,6 +392,11 @@
                     <!-- Resumen General -->
                     <div id="asist-resumen-general" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:1rem;">
                         <!-- Se llena dinámicamente -->
+                    </div>
+
+                    <div class="btn-group mt-2 mb-2" style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-primary btn-auto" id="asist-modo-unidad" onclick="cambiarVistaAsistencia('unidad')">Por transporte</button>
+                        <button type="button" class="btn btn-outline btn-auto" id="asist-modo-parada" onclick="cambiarVistaAsistencia('parada')">Por parada de subida</button>
                     </div>
 
                     <!-- Filtro rápido por transporte -->
@@ -450,7 +457,7 @@
                 </div>
                 <div class="card" style="padding:1.5rem;">
                     <h3 class="mb-2">Asientos de la unidad</h3>
-                    <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. El frente queda a la izquierda.</p>
+                    <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. En el bus y en el microbús el frente queda arriba. En la moto, a la izquierda.</p>
                     <div id="op-croquis" style="width:100%; overflow-x:auto;"><p class="text-muted">Elija una unidad.</p></div>
                 </div>
             </div>
@@ -511,7 +518,7 @@
                                 <label>Topología del Vehículo</label>
                                 <select id="t-topologia-select" required style="width:100%; padding:8px;">
                                     <option value="bus_50">Autobús (50 Plazas)</option>
-                                    <option value="microbus_16">Microbús (16 plazas)</option>
+                                    <option value="microbus_16">Microbús (18 plazas)</option>
                                     <option value="moto">Motocicleta</option>
                                 </select>
                             </div>

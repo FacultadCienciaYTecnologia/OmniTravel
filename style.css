@@ -560,9 +560,35 @@ th {
 .steering-wheel-v::after {
     content: ''; position: absolute; top: 50%; left: 4px; right: 4px; height: 2px; background: #5c6b7a;
 }
+.bus-v {
+    width: 248px;
+    margin: 0 auto;
+    padding: 12px;
+    background: #f4f7fa;
+    border: 1px solid #b7c3cf;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.bus-v-frente {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #b7c3cf;
+    margin-bottom: 2px;
+}
+.bus-v-puerta {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
 .bus-v-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
 .bus-v-aisle { flex-grow: 1; min-width: 18px; }
-.bus-v-group { display: flex; gap: 4px; }
+.bus-v-group { display: flex; gap: 4px; min-height: 42px; }
+.bus-v-fondo { display: flex; justify-content: space-between; gap: 4px; margin-top: 4px; padding-top: 8px; border-top: 1px dashed #b7c3cf; }
 .bus-bano {
     width: 86px; height: 42px;
     border: 1px dashed #7d8b99;
@@ -581,6 +607,65 @@ th {
 .seat-v.selected { background: var(--success); border-color: #145236; color: #fff; }
 .seat-v.occupied-blue { background: var(--navy); border-color: var(--navy); color: #fff; cursor: not-allowed; }
 .seat-v.occupied-red { background: #6e3030; border-color: #6e3030; color: #fff; cursor: not-allowed; }
+.micro-v {
+    width: max-content;
+    margin: 0 auto;
+    padding: 12px;
+    background: #f4f7fa;
+    border: 1px solid #b7c3cf;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.micro-v-frente {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.micro-v-fila {
+    display: grid;
+    grid-template-columns: 52px 44px 76px 44px;
+    justify-items: center;
+    gap: 6px;
+    align-items: center;
+    justify-content: start;
+}
+.micro-v-puerta {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+}
+.micro-v-banco {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 76px;
+}
+.micro-v-banco span {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #7a5410;
+    text-align: center;
+    line-height: 1.15;
+}
+.micro-v-fondo {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px dashed #b7c3cf;
+}
+.seat-v.seat-banco { border-style: dashed; border-color: #9a6b12; background: #fbf6ea; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 0.8rem; font-size: 0.85rem; color: var(--text); }
 .legend-item { display: flex; align-items: center; gap: 6px; }

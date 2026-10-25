@@ -492,6 +492,10 @@ async function iniciarRuta() {
     });
     if(!res.isConfirmed) return;
 
+    const puntos = puntosDeRuta(window.rutaActual);
+    const cercaInicio = await validarCercaDePunto(puntos[0], 50, 'Muy lejos del punto de inicio', 'Para iniciar la ida debe estar a 50 metros o menos del punto de partida. Las paradas intermedias no cuentan.');
+    if (!cercaInicio) return;
+
     try {
         await window.db.from('viajes').update({ estado: 'en_ruta_ida' }).eq('id', viajeIdActual);
         document.getElementById('btn-iniciar').style.display = 'none';
@@ -520,6 +524,10 @@ async function iniciarRetorno() {
         cancelButtonText: 'Cancelar'
     });
     if(!res.isConfirmed) return;
+
+    const puntos = puntosDeRuta(window.rutaActual);
+    const cercaRegreso = await validarCercaDePunto(puntos[puntos.length - 1], 50, 'Muy lejos del punto de regreso', 'Para iniciar el regreso debe estar a 50 metros o menos del punto de retorno. Las paradas intermedias no cuentan.');
+    if (!cercaRegreso) return;
 
     try {
         await window.db.from('viajes').update({ estado: 'en_ruta_vuelta' }).eq('id', viajeIdActual);
@@ -911,7 +919,7 @@ async function cargarAnotadosYVehiculos() {
             return;
         }
 
-        const tipoNom = transporteAdmin.tipo === 'bus_50' ? 'Autobús (50)' : (transporteAdmin.tipo === 'microbus_15' ? 'Microbús (15)' : 'Moto');
+        const tipoNom = nombreTipoTransporte(transporteAdmin.tipo);
         const opcionesTransporte = `<option value="" disabled selected>Asignar a...</option><option value="${transporteIdActual}">Mi Vehículo: ${tipoNom}</option>`;
 
         // Traer usuarios anotados o asignados a este viaje (excluir admins)
@@ -1005,17 +1013,26 @@ async function renderAdminCroquis() {
         const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.id).sort() : [];
         occupiedIds.push('MINE:' + (session.asiento || 'none'));
         const occupiedStr = JSON.stringify(occupiedIds);
-        
-        if (croquisDiv.innerHTML !== '' && lastAdminOccupiedStr === occupiedStr) return;
-        lastAdminOccupiedStr = occupiedStr;
 
         if(usuarios) {
             usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
         }
 
+        window.croquisTipoAdmin = t.tipo;
         const miAsiento = session.asiento;
-        const html = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual));
-        if (croquisDiv) croquisDiv.innerHTML = html;
+        const plazas = plazasPorTipo(t.tipo);
+        const html = htmlAsientos(plazas, (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual));
+        if (croquisDiv) {
+            pintarCroquisVivo(croquisDiv, plazas, 'admin-' + transporteIdActual, occupiedStr, html, (el, n) => {
+                const pieza = genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteIdActual);
+                const tmp = document.createElement('div');
+                tmp.innerHTML = pieza;
+                const neu = tmp.firstElementChild;
+                if (!neu) return;
+                el.className = neu.className;
+                el.setAttribute('onclick', neu.getAttribute('onclick') || '');
+            });
+        }
     } catch(e) {
         console.error(e);
     }
@@ -1026,7 +1043,8 @@ function genAdminSeat(numero, ocupadosInfo, miAsiento, viajeId, transporteId) {
     const esMio = (miAsiento == numero.toString() && session.transporte_id == transporteId);
     const usuarioAsiento = ocupadosInfo[numero.toString()];
     
-    let clase = 'seat-v';
+    const banco = (window.croquisTipoAdmin === 'microbus_16' || window.croquisTipoAdmin === 'microbus_15') && esAsientoSinRespaldo(numero);
+    let clase = 'seat-v' + (banco ? ' seat-banco' : '');
     let onclickFn = `seleccionarAsientoVIP(${numero}, '${viajeId}', '${transporteId}')`;
     
     if(esMio) {
@@ -1059,7 +1077,7 @@ function verDetalleAsiento(nombre, foto, dni, fechaReserva) {
 function seleccionarAsientoVIP(numero, viajeId, transporteId) {
     const miAsiento = session.asiento;
     
-    if (miAsiento == numero.toString()) {
+    if (miAsiento == numero.toString() && String(session.transporte_id) === String(transporteId)) {
         Swal.fire({
             title: `¿Liberar el Asiento VIP ${numero}?`,
             text: "Te quedarás sin asiento asignado en este viaje.",
@@ -1082,6 +1100,13 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         return;
     }
 
+    if ((window.croquisTipoAdmin === 'microbus_16' || window.croquisTipoAdmin === 'microbus_15') && esAsientoSinRespaldo(numero)) {
+        return Swal.fire('Reservado', 'Los asientos ' + textoAsientosSinRespaldo() + ' no tienen respaldar. Solo los eligen las dos personas designadas.', 'info');
+    }
+    if (session.transporte_id && session.asiento && String(session.transporte_id) !== String(transporteId)) {
+        return Swal.fire('Un solo asiento', 'Ya tiene el asiento ' + session.asiento + ' en su unidad. Libérelo antes de tomar otro. Cada persona tiene un solo asiento.', 'warning');
+    }
+
     Swal.fire({
         title: `¿Cambiar al Asiento VIP ${numero}?`,
         text: miAsiento ? "Tu asiento anterior quedará libre." : "",
@@ -1092,10 +1117,8 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         if(res.isConfirmed) {
             try {
                 // Doble check para colisiones
-                const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', transporteId).eq('asiento', numero.toString()).limit(1);
-                if (check && check.length > 0) {
-                    return Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
-                }
+                const libre = await puedeTomarAsiento(session.id, transporteId, numero);
+                if (!libre.ok) return Swal.fire('No disponible', libre.motivo, 'warning');
 
                 await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                 session.asiento = numero.toString();

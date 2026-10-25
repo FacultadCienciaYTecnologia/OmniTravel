@@ -163,6 +163,7 @@ async function loadDashboard() {
 
         // Viajes
         const { data: viajes } = await window.db.from('viajes').select('*');
+        window.viajesLista = viajes || [];
         document.getElementById('stat-viajes').innerText = viajes ? viajes.length : 0;
         renderViajes(viajes || []);
         pintarGpsGlobal();
@@ -979,7 +980,7 @@ async function cargarTransportesModal(viajeId) {
         }
 
         container.innerHTML = '';
-        transportes.forEach((t, index) => {
+        ordenarTransportesVisible(transportes).forEach((t) => {
             const adminName = t.admin ? t.admin.nombre_completo : '<span style="color:#64748b; font-style:italic;">Sin chofer asignado (Sigue al bus líder)</span>';
             const imgHtml = t.imagen_url ? `<img src="${t.imagen_url}" style="width:100px; height:60px; object-fit:cover; border-radius:5px; margin-right:15px;">` : `<div style="width:100px; height:60px; background:#e2e8f0; border-radius:5px; margin-right:15px; display:flex; align-items:center; justify-content:center;">🚌</div>`;
             
@@ -997,7 +998,7 @@ async function cargarTransportesModal(viajeId) {
                     <div style="display:flex; align-items:center; border-bottom:1px solid #f1f5f9; padding-bottom:10px;">
                         ${imgHtml}
                         <div>
-                            <h4 style="margin:0;">Vehículo #${index + 1} - ${t.tipo.toUpperCase()}</h4>
+                            <h4 style="margin:0;">${escaparHtml(etiquetaTransporte(t, transportes))}</h4>
                             <p style="margin:0; font-size:0.85rem; color:#64748b;">Chofer: ${adminName} <button class="btn btn-outline" style="padding:2px 5px; font-size:0.7rem; margin-left:5px;" onclick="cambiarChofer('${t.id}', '${t.admin_id}', '${viajeId}', '${t.tipo}')">${t.admin_id ? 'Cambiar' : 'Asignar chofer'}</button></p>
                         </div>
                         <button class="btn btn-outline error" style="margin-left:auto; padding:5px 10px; font-size:0.8rem;" onclick="eliminarTransporte('${t.id}', '${viajeId}')">Eliminar</button>
@@ -1136,47 +1137,24 @@ async function renderAdminCroquis(origen) {
         const occupiedIds = usuarios ? usuarios.map(u => u.asiento + '-' + u.id).sort() : [];
         occupiedIds.push('MINE:' + (session.asiento || 'none'));
         const occupiedStr = JSON.stringify(occupiedIds);
-        
-        if (croquisDiv.innerHTML !== '' && lastAdminOccupiedStr === occupiedStr) return;
-        lastAdminOccupiedStr = occupiedStr;
 
         if(usuarios) {
             usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; });
         }
 
+        window.croquisTipoAdmin = t.tipo;
         const miAsiento = session.asiento;
-        croquisDiv.innerHTML = htmlAsientos(plazasPorTipo(t.tipo), (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId));
-
-        if (t.tipo === 'bus_50') {
-            const { data: allBuses } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', t.viaje_id).eq('tipo', 'bus_50').order('creado_en', { ascending: true });
-            const esBus2 = allBuses && allBuses.length >= 2 && allBuses[1].id === transporteId;
-            if (esBus2) {
-                const parados = (usuarios || []).filter(u => String(u.asiento || '').startsWith('Parado'));
-                let paradosHtml = `<div class="mt-3 p-3" style="background:#f0f9ff; border:1.5px solid #7dd3fc; border-radius:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-                        <strong style="color:#0369a1; font-size:0.95rem;">🚶 Pasajeros de Pie / Parados (Transporte 2 - Capacidad total: 54)</strong>
-                        <span class="badge" style="background:#0284c7; color:#fff; font-size:0.8rem; padding:3px 10px; border-radius:12px;">${parados.length}/4 autorizados de pie</span>
-                    </div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">`;
-                for (let i = 1; i <= 4; i++) {
-                    const u = parados.find(x => x.asiento === 'Parado ' + i) || parados[i - 1];
-                    if (u) {
-                        paradosHtml += `<div style="background:#fff; border:1px solid #93c5fd; border-radius:6px; padding:8px 12px;">
-                            <span style="font-weight:700; color:#0284c7; font-size:0.75rem; text-transform:uppercase;">Lugar #${i}</span>
-                            <div style="font-weight:700; color:#0f172a; font-size:0.9rem;">${escaparHtml(u.nombre_completo)}</div>
-                            <small style="color:#64748b;">${escaparHtml(u.dni || 'Sin documento')}</small>
-                        </div>`;
-                    } else {
-                        paradosHtml += `<div style="background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; padding:8px 12px; color:#94a3b8;">
-                            <span style="font-weight:600; font-size:0.75rem; text-transform:uppercase;">Lugar #${i}</span>
-                            <div style="font-size:0.85rem; font-style:italic;">Disponible (De pie)</div>
-                        </div>`;
-                    }
-                }
-                paradosHtml += `</div></div>`;
-                croquisDiv.innerHTML += paradosHtml;
-            }
-        }
+        const plazas = plazasPorTipo(t.tipo);
+        const html = htmlAsientos(plazas, (n) => genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId));
+        pintarCroquisVivo(croquisDiv, plazas, (desdeOperacion ? 'op-' : 'adm-') + transporteId, occupiedStr, html, (el, n) => {
+            const pieza = genAdminSeat(n, asientosOcupadosInfo, miAsiento, t.viaje_id, transporteId);
+            const tmp = document.createElement('div');
+            tmp.innerHTML = pieza;
+            const neu = tmp.firstElementChild;
+            if (!neu) return;
+            el.className = neu.className;
+            el.setAttribute('onclick', neu.getAttribute('onclick') || '');
+        });
 
     } catch(e) {
         console.error(e);
@@ -1190,7 +1168,8 @@ function genAdminSeat(numero, ocupadosInfo, miAsiento, viajeId, transporteId) {
     const esMio = (miAsiento == numero.toString() && session.transporte_id == transporteId);
     const usuarioAsiento = ocupadosInfo[numero.toString()];
     
-    let clase = 'seat-v';
+    const banco = (window.croquisTipoAdmin === 'microbus_16' || window.croquisTipoAdmin === 'microbus_15') && esAsientoSinRespaldo(numero);
+    let clase = 'seat-v' + (banco ? ' seat-banco' : '');
     let onclickFn = `seleccionarAsientoVIP(${numero}, '${viajeId}', '${transporteId}')`;
     
     if(esMio) {
@@ -1223,7 +1202,7 @@ function verDetalleAsiento(nombre, foto, dni, fechaReserva) {
 function seleccionarAsientoVIP(numero, viajeId, transporteId) {
     const miAsiento = session.asiento;
     
-    if (miAsiento == numero.toString()) {
+    if (miAsiento == numero.toString() && String(session.transporte_id) === String(transporteId)) {
         Swal.fire({
             title: `¿Liberar el Asiento VIP ${numero}?`,
             text: "Te quedarás sin asiento asignado en este viaje.",
@@ -1247,6 +1226,13 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         return;
     }
 
+    if ((window.croquisTipoAdmin === 'microbus_16' || window.croquisTipoAdmin === 'microbus_15') && esAsientoSinRespaldo(numero)) {
+        return Swal.fire('Reservado', 'Los asientos ' + textoAsientosSinRespaldo() + ' no tienen respaldar. Solo los eligen las dos personas designadas.', 'info');
+    }
+    if (session.transporte_id && session.asiento && String(session.transporte_id) !== String(transporteId)) {
+        return Swal.fire('Un solo asiento', 'Ya tiene el asiento ' + session.asiento + ' en su unidad. Libérelo antes de tomar otro. Cada persona tiene un solo asiento.', 'warning');
+    }
+
     if (miAsiento) {
         Swal.fire({
             title: `¿Cambiar al Asiento VIP ${numero}?`,
@@ -1257,6 +1243,8 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
+                    const libre = await puedeTomarAsiento(session.id, transporteId, numero);
+                    if (!libre.ok) return Swal.fire('No disponible', libre.motivo, 'warning');
                     const { error } = await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                     if (error) throw error;
                     session.asiento = numero.toString();
@@ -1285,10 +1273,8 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
         if(res.isConfirmed) {
             try {
                 // Doble check
-                const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', transporteId).eq('asiento', numero.toString()).limit(1);
-                if (check && check.length > 0) {
-                    return Swal.fire('Error', 'Ese asiento acaba de ser tomado.', 'error');
-                }
+                const libre = await puedeTomarAsiento(session.id, transporteId, numero);
+                if (!libre.ok) return Swal.fire('No disponible', libre.motivo, 'warning');
 
                 const { error } = await window.db.from('usuarios').update({
                     viaje_id: viajeId,
@@ -1317,13 +1303,24 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
 function cargarSelectAdminVehiculos(transportesArray) {
     const select = document.getElementById('admin-vehiculo-select');
     if(!select) return;
-    const currentVal = select.value; // Guardar estado
-    select.innerHTML = '<option value="">Selecciona un vehículo...</option>';
-    transportesArray.forEach((t, i) => {
-        const tipoNom = nombreTipoTransporte(t.tipo);
-        select.innerHTML += `<option value="${t.id}">Vehículo ${i + 1} - ${tipoNom} [Viaje ${t.viaje_id.substring(0,4)}]</option>`;
+    const currentVal = select.value;
+    const porViaje = {};
+    (transportesArray || []).forEach((t) => {
+        if (!porViaje[t.viaje_id]) porViaje[t.viaje_id] = [];
+        porViaje[t.viaje_id].push(t);
     });
-    if(currentVal) select.value = currentVal; // Restaurar estado
+    const viajes = Object.keys(porViaje);
+    select.innerHTML = '<option value="">Selecciona un vehículo...</option>';
+    viajes.forEach((viajeId) => {
+        const grupo = porViaje[viajeId];
+        const titulo = ((window.viajesLista || []).find((v) => v.id === viajeId) || {}).titulo;
+        ordenarTransportesVisible(grupo).forEach((t) => {
+            const nombre = etiquetaTransporte(t, grupo);
+            const extra = viajes.length > 1 && titulo ? ' · ' + titulo : '';
+            select.innerHTML += `<option value="${t.id}">${escaparHtml(nombre + extra)}</option>`;
+        });
+    });
+    if(currentVal) select.value = currentVal;
 }
 
 function renderAsignacionSuper(viajeId, transportes, anotados) {
@@ -1343,12 +1340,12 @@ function renderAsignacionSuper(viajeId, transportes, anotados) {
     tbody.innerHTML = '';
     lista.forEach((u) => {
         let opciones = '<option value="">Sin asignar</option>';
-        (transportes || []).forEach((t, i) => {
+        ordenarTransportesVisible(transportes).forEach((t) => {
             const plazas = plazasPorTipo(t.tipo);
             const usados = cupo[t.id] || 0;
             const lleno = usados >= plazas && u.transporte_id !== t.id;
             const selected = u.transporte_id === t.id ? ' selected' : '';
-            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${nombreTipoTransporte(t.tipo)} ${i + 1} (${usados}/${plazas})</option>`;
+            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(etiquetaTransporte(t, transportes))} (${usados}/${plazas})</option>`;
         });
         tbody.innerHTML += `<tr>
             <td>${escaparHtml(u.nombre_completo)}</td>
@@ -1397,7 +1394,7 @@ async function pintarAsignacion(usarCache) {
         return;
     }
     if (!usarCache || !window.personasAsignacion) {
-        const consultaT = window.db.from('transportes').select('id, tipo, viaje_id').eq('viaje_id', viajeId);
+        const consultaT = window.db.from('transportes').select('id, tipo, viaje_id, creado_en').eq('viaje_id', viajeId);
         const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje, estado_aprobacion, asiento').eq('rol', 'estudiante');
         const consultaV = window.db.from('viajes').select('id, titulo');
         const [tRes, pRes, vRes] = await Promise.all([consultaT, consultaP, consultaV]);
@@ -1405,7 +1402,7 @@ async function pintarAsignacion(usarCache) {
         window.personasAsignacion = pRes.data || [];
         if (vRes.data) window.viajesAsignacion = vRes.data;
     }
-    const transportes = window.transportesAsignacion || [];
+    const transportes = ordenarTransportesVisible(window.transportesAsignacion || []);
     const q = ((document.getElementById('asig-buscar') || {}).value || '').trim().toLowerCase();
     const filtroEl = document.getElementById('asig-filtro-transporte');
     const filtroVal = filtroEl ? filtroEl.value : 'todos';
@@ -1421,101 +1418,16 @@ async function pintarAsignacion(usarCache) {
     const motoIds = new Set(motos.map(t => t.id));
     const idsUnidad = new Set(transportes.map((t) => t.id));
 
-    // Conteo de pasajeros totales, sentados y parados
     const cupo = {};
-    const paradosBus2 = (window.personasAsignacion || []).filter(u => u.viaje_id === viajeId && u.transporte_id === bus2Id && String(u.asiento || '').startsWith('Parado'));
-    const sentadosBus2 = (window.personasAsignacion || []).filter(u => u.viaje_id === viajeId && u.transporte_id === bus2Id && !String(u.asiento || '').startsWith('Parado'));
-
     (window.personasAsignacion || []).forEach((u) => {
         if (u.transporte_id && idsUnidad.has(u.transporte_id)) cupo[u.transporte_id] = (cupo[u.transporte_id] || 0) + 1;
     });
-
-    // Renderizar Apartado Especial de Personas Paradas para Transporte 2
-    const contenedorApartadoParados = document.getElementById('asig-apartado-parados');
-    if (contenedorApartadoParados) {
-        if (!bus2Id) {
-            contenedorApartadoParados.style.display = 'none';
-            contenedorApartadoParados.innerHTML = '';
-        } else {
-            contenedorApartadoParados.style.display = 'block';
-
-            // Candidatos para ir de pie: estudiantes del viaje que no están de pie
-            const candidatos = (window.personasAsignacion || [])
-                .filter(u => u.viaje_id === viajeId && !String(u.asiento || '').startsWith('Parado'))
-                .sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo), 'es'));
-
-            const opcionesCandidatos = candidatos.map(u => {
-                const situacionText = u.transporte_id === bus2Id ? 'En Bus 2 (sentado)' : (u.transporte_id ? 'En otro transporte' : 'Sin transporte');
-                return `<option value="${u.id}">${escaparHtml(u.nombre_completo)} (${situacionText})</option>`;
-            }).join('');
-
-            let slotsHtml = '';
-            for (let slot = 1; slot <= 4; slot++) {
-                const slotName = 'Parado ' + slot;
-                const ocupante = paradosBus2.find(u => u.asiento === slotName) || paradosBus2[slot - 1];
-                if (ocupante) {
-                    slotsHtml += `
-                        <div style="background:#ffffff; border:1.5px solid #93c5fd; border-radius:8px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                            <div>
-                                <div style="font-size:0.75rem; font-weight:800; color:#0284c7; text-transform:uppercase; letter-spacing:0.5px;">Lugar Parado #${slot}</div>
-                                <div style="font-weight:700; color:#0f172a; font-size:0.95rem; margin-top:2px;">${escaparHtml(ocupante.nombre_completo)}</div>
-                                <div style="font-size:0.8rem; color:#64748b;">DNI: ${escaparHtml(ocupante.dni || 'Sin DNI')}</div>
-                            </div>
-                            <div>
-                                <button type="button" class="btn btn-outline btn-auto" style="color:#dc2626; border-color:#fca5a5; font-size:0.8rem; padding:4px 10px;" onclick="quitarParado('${ocupante.id}')" title="Modificar o quitar asignación">
-                                    Quitar
-                                </button>
-                            </div>
-                        </div>`;
-                } else {
-                    slotsHtml += `
-                        <div style="background:#ffffff; border:1.5px dashed #7dd3fc; border-radius:8px; padding:12px 14px; display:flex; flex-direction:column; gap:8px;">
-                            <div style="font-size:0.75rem; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Lugar Parado #${slot} (Disponible)</div>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <select id="select-parado-${slot}" style="flex:1; font-size:0.85rem; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; max-width:240px;">
-                                    <option value="">Seleccionar estudiante...</option>
-                                    ${opcionesCandidatos}
-                                </select>
-                                <button type="button" class="btn btn-primary btn-auto" style="background:#0284c7; border-color:#0284c7; font-size:0.8rem; padding:6px 12px; white-space:nowrap;" onclick="asignarParadoSlot(${slot})">
-                                    Asignar
-                                </button>
-                            </div>
-                        </div>`;
-                }
-            }
-
-            contenedorApartadoParados.innerHTML = `
-                <div style="background:linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border:1.5px solid #7dd3fc; border-radius:10px; padding:1.25rem; box-shadow:0 2px 8px rgba(3,105,161,0.08);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-                        <div>
-                            <h4 style="margin:0; color:#0369a1; display:flex; align-items:center; gap:8px; font-size:1.1rem;">
-                                <span>🚶</span> <span>Pasajeros de Pie / Parados (Transporte 2 - Bus 2)</span>
-                                <span class="badge" style="background:#0284c7; color:#fff; font-size:0.8rem; padding:3px 10px; border-radius:12px;">${paradosBus2.length}/4 Ocupados</span>
-                            </h4>
-                            <p style="margin:4px 0 0 0; font-size:0.85rem; color:#075985;">
-                                Capacidad autorizada: 4 plazas de pie (50 sentados + 4 parados = 54 personas en total). Asigne a los estudiantes que viajarán de pie directamente en las casillas o en el selector de la tabla.
-                            </p>
-                        </div>
-                    </div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
-                        ${slotsHtml}
-                    </div>
-                </div>`;
-        }
-    }
 
     if (resumen) {
         resumen.innerHTML = transportes.length
             ? '<div class="btn-group" style="display:flex; flex-wrap:wrap; gap:8px;">' + transportes.map((t) => {
                 const label = etiquetaTransporte(t, transportes);
                 const total = cupo[t.id] || 0;
-                if (bus2Id && t.id === bus2Id) {
-                    const s = sentadosBus2.length;
-                    const p = paradosBus2.length;
-                    return `<span class="badge" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;padding:6px 12px;font-size:0.9rem;">
-                        <strong>${escaparHtml(label)}</strong>: ${total}/54 plazas <small style="display:block;font-size:0.78rem;color:#0284c7;">(${s}/50 sentados · ${p}/4 de pie)</small>
-                    </span>`;
-                }
                 const plazas = plazasPorTipo(t.tipo);
                 return `<span class="badge" style="background:#f4f7fa;color:#0c2340;border:1px solid #cfd6de;padding:6px 12px;font-size:0.9rem;">
                     <strong>${escaparHtml(label)}</strong>: ${total}/${plazas}
@@ -1530,12 +1442,8 @@ async function pintarAsignacion(usarCache) {
     // Filtros de transporte
     if (filtroVal === 'bus_1') {
         lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus1Id);
-    } else if (filtroVal === 'bus_2') {
+    } else if (filtroVal === 'bus_2' || filtroVal === 'bus_2_sentados' || filtroVal === 'bus_2_parados') {
         lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus2Id);
-    } else if (filtroVal === 'bus_2_sentados') {
-        lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus2Id && (!u.asiento || !String(u.asiento).startsWith('Parado')));
-    } else if (filtroVal === 'bus_2_parados') {
-        lista = lista.filter((u) => u.viaje_id === viajeId && u.transporte_id === bus2Id && (u.asiento && String(u.asiento).startsWith('Parado')));
     } else if (filtroVal === 'microbus') {
         lista = lista.filter((u) => u.viaje_id === viajeId && microbusIds.has(u.transporte_id));
     } else if (filtroVal === 'motos') {
@@ -1558,9 +1466,7 @@ async function pintarAsignacion(usarCache) {
     tbody.innerHTML = lista.map((u) => {
         let situacion = 'Sin viaje';
         if (u.viaje_id === viajeId && idsUnidad.has(u.transporte_id)) {
-            if (u.asiento && String(u.asiento).startsWith('Parado')) {
-                situacion = `<span class="badge" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;font-weight:700;">🚶 De pie (${escaparHtml(u.asiento)})</span>`;
-            } else if (u.asiento) {
+            if (u.asiento && !String(u.asiento).startsWith('Parado')) {
                 const trObj = transportes.find(t => t.id === u.transporte_id);
                 situacion = `Asiento ${escaparHtml(u.asiento)} en ${escaparHtml(etiquetaTransporte(trObj, transportes))}`;
             } else {
@@ -1569,6 +1475,7 @@ async function pintarAsignacion(usarCache) {
         }
         else if (u.viaje_id === viajeId) situacion = 'Anotado, sin transporte';
         else if (u.viaje_id) situacion = 'En otro viaje: ' + tituloViaje(u.viaje_id);
+        if (u.estado_viaje === 'sin_respaldo' || esAsientoSinRespaldo(u.asiento)) situacion += ' · sin respaldar';
         if (u.estado_aprobacion && u.estado_aprobacion !== 'aprobado') situacion += ' · cuenta sin aprobar';
         
         const enEstaUnidad = idsUnidad.has(u.transporte_id);
@@ -1579,28 +1486,23 @@ async function pintarAsignacion(usarCache) {
 
         transportes.forEach((t) => {
             const label = etiquetaTransporte(t, transportes);
-            if (bus2Id && t.id === bus2Id) {
-                const esEste = u.transporte_id === t.id;
-                const esParado = esEste && u.asiento && String(u.asiento).startsWith('Parado');
-                const esSentado = esEste && !esParado;
-                const llenoSentados = sentadosBus2.length >= 50 && !esSentado;
-                const llenoParados = paradosBus2.length >= 4 && !esParado;
-
-                opciones += `<option value="${t.id}"${esSentado ? ' selected' : ''}${llenoSentados ? ' disabled' : ''}>${escaparHtml(label)} - Sentado (${sentadosBus2.length}/50)</option>`;
-                opciones += `<option value="${t.id}:parado"${esParado ? ' selected' : ''}${llenoParados ? ' disabled' : ''}>${escaparHtml(label)} - De pie / Parado (${paradosBus2.length}/4)</option>`;
-            } else {
-                const plazas = plazasPorTipo(t.tipo);
-                const usados = cupo[t.id] || 0;
-                const lleno = usados >= plazas && u.transporte_id !== t.id;
-                const selected = u.transporte_id === t.id ? ' selected' : '';
-                opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(label)} (${usados}/${plazas})</option>`;
-            }
+            const plazas = plazasPorTipo(t.tipo);
+            const usados = cupo[t.id] || 0;
+            const lleno = usados >= plazas && u.transporte_id !== t.id;
+            const selected = u.transporte_id === t.id ? ' selected' : '';
+            opciones += `<option value="${t.id}"${selected}${lleno ? ' disabled' : ''}>${escaparHtml(label)} (${usados}/${plazas})</option>`;
         });
+        const unidadPersona = transportes.find((t) => t.id === u.transporte_id);
+        const esMicroPersona = unidadPersona && (unidadPersona.tipo === 'microbus_16' || unidadPersona.tipo === 'microbus_15');
+        const designadoBanco = u.estado_viaje === 'sin_respaldo' || esAsientoSinRespaldo(u.asiento);
+        const btnBanco = esMicroPersona
+            ? `<button type="button" class="btn btn-outline btn-auto" style="margin-top:6px;" onclick="marcarSinRespaldo('${u.id}')">${designadoBanco ? 'Quitar sin respaldar' : 'Designar sin respaldar'}</button>`
+            : '';
         return `<tr>
             <td>${escaparHtml(u.nombre_completo)}</td>
             <td>${escaparHtml(u.dni || 'Menor')}</td>
             <td>${situacion}</td>
-            <td><select onchange="asignarDesdePanel('${u.id}', this.value)">${opciones}</select></td>
+            <td><select onchange="asignarDesdePanel('${u.id}', this.value)">${opciones}</select>${btnBanco}</td>
         </tr>`;
     }).join('');
 }
@@ -1610,16 +1512,7 @@ async function asignarDesdePanel(usuarioId, valorSeleccionado) {
     const actual = (window.personasAsignacion || []).find((u) => u.id === usuarioId);
     if (!viajeId) return;
 
-    // Caso 1: Asignar como pasajero de pie
-    if (typeof valorSeleccionado === 'string' && valorSeleccionado.endsWith(':parado')) {
-        const tId = valorSeleccionado.split(':')[0];
-        await asignarComoParado(usuarioId, tId, viajeId);
-        return;
-    }
-
     const transporteId = valorSeleccionado;
-    const buses = (window.transportesAsignacion || []).filter(t => t.tipo === 'bus_50');
-    const bus2Id = buses[1] ? buses[1].id : null;
 
     try {
         if (!transporteId || transporteId === '__actual') {
@@ -1666,15 +1559,7 @@ async function asignarDesdePanel(usuarioId, valorSeleccionado) {
         }
 
         const t = (window.transportesAsignacion || []).find((x) => x.id === transporteId);
-        if (t && bus2Id && t.id === bus2Id) {
-            // Capacidad de sentados en Bus 2 es 50
-            const sentados = (window.personasAsignacion || []).filter((u) => u.transporte_id === bus2Id && u.id !== usuarioId && !String(u.asiento || '').startsWith('Parado')).length;
-            if (sentados >= 50) {
-                Swal.fire('Cupo lleno', 'Los 50 asientos regulares de Bus 2 están ocupados. Puede asignarlo como persona de pie.', 'warning');
-                await pintarAsignacion(true);
-                return;
-            }
-        } else if (t) {
+        if (t) {
             const usados = (window.personasAsignacion || []).filter((u) => u.transporte_id === transporteId && u.id !== usuarioId).length;
             if (usados >= plazasPorTipo(t.tipo)) {
                 Swal.fire('Cupo lleno', 'Esa unidad ya no tiene lugares disponibles.', 'warning');
@@ -1690,8 +1575,8 @@ async function asignarDesdePanel(usuarioId, valorSeleccionado) {
         if (actual && actual.asiento && String(actual.asiento).startsWith('Parado')) {
             cambios.asiento = null;
             cambios.estado_viaje = 'asignado';
-        } else if (mismo && actual.estado_viaje === 'asiento_elegido') {
-            /* conserva el asiento ya elegido en esta misma unidad */
+        } else if (mismo && (actual.estado_viaje === 'asiento_elegido' || actual.estado_viaje === 'sin_respaldo')) {
+            /* conserva el asiento o la designación en esta misma unidad */
         } else {
             cambios.asiento = null;
             cambios.estado_viaje = 'asignado';
@@ -1711,142 +1596,23 @@ async function asignarDesdePanel(usuarioId, valorSeleccionado) {
     }
 }
 
-async function asignarComoParado(usuarioId, transporteId, viajeId, slotDeseado) {
-    const actual = (window.personasAsignacion || []).find((u) => u.id === usuarioId);
-    if (!actual || !viajeId || !transporteId) return;
-
-    if (actual.viaje_id && actual.viaje_id !== viajeId) {
-        const ok = await Swal.fire({
-            title: 'Esta persona está en otro viaje',
-            text: 'Pasará a este viaje asignado de pie en Bus 2.',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'Mover a este viaje'
-        });
-        if (!ok.isConfirmed) {
-            await pintarAsignacion(true);
-            return;
-        }
-    }
-
-    // Identificar qué slots de pie están ocupados
-    const paradosOcupados = (window.personasAsignacion || [])
-        .filter(u => u.transporte_id === transporteId && u.id !== usuarioId && String(u.asiento || '').startsWith('Parado'))
-        .map(u => u.asiento);
-
-    let targetSlot = null;
-    if (slotDeseado && !paradosOcupados.includes('Parado ' + slotDeseado)) {
-        targetSlot = 'Parado ' + slotDeseado;
-    } else {
-        for (let i = 1; i <= 4; i++) {
-            if (!paradosOcupados.includes('Parado ' + i)) {
-                targetSlot = 'Parado ' + i;
-                break;
-            }
-        }
-    }
-
-    if (!targetSlot) {
-        Swal.fire('Cupo de pie lleno', 'Ya están ocupados los 4 lugares de pie autorizados en Transporte 2 (Bus 2).', 'warning');
-        await pintarAsignacion(true);
-        return;
-    }
-
-    try {
-        const { error } = await window.db.from('usuarios').update({
-            transporte_id: transporteId,
-            viaje_id: viajeId,
-            asiento: targetSlot,
-            estado_viaje: 'asiento_elegido',
-            fecha_reserva: new Date().toISOString()
-        }).eq('id', usuarioId);
-        if (error) throw error;
-
-        window.personasAsignacion = null;
-        await pintarAsignacion();
-        notificarCambioAsiento(viajeId, transporteId);
-        Swal.fire({
-            toast: true,
-            position: 'top-end',
-            icon: 'success',
-            title: `🚶 Asignado a ${targetSlot} en Bus 2`,
-            showConfirmButton: false,
-            timer: 2500
-        });
-    } catch (e) {
-        console.error(e);
-        Swal.fire('Error', 'No se pudo asignar a lugar de pie.', 'error');
-        window.personasAsignacion = null;
-        await pintarAsignacion();
-    }
-}
-
-async function asignarParadoSlot(slotIndex) {
-    const sel = document.getElementById(`select-parado-${slotIndex}`);
-    if (!sel || !sel.value) {
-        Swal.fire('Atención', 'Selecciona primero un estudiante para asignar a este lugar de pie.', 'warning');
-        return;
-    }
-    const usuarioId = sel.value;
-    const viajeId = document.getElementById('asig-viaje').value;
-    const buses = (window.transportesAsignacion || []).filter(t => t.tipo === 'bus_50');
-    const bus2Id = buses[1] ? buses[1].id : (buses[0] ? buses[0].id : null);
-    if (!bus2Id) {
-        Swal.fire('Error', 'No se encontró el Transporte 2 en este viaje.', 'error');
-        return;
-    }
-    await asignarComoParado(usuarioId, bus2Id, viajeId, slotIndex);
-}
-
-async function quitarParado(usuarioId) {
+async function marcarSinRespaldo(usuarioId) {
     const actual = (window.personasAsignacion || []).find((u) => u.id === usuarioId);
     if (!actual) return;
-    const viajeId = document.getElementById('asig-viaje').value;
-
-    const res = await Swal.fire({
-        title: 'Modificar asignación de pie',
-        text: `¿Qué deseas hacer con ${actual.nombre_completo}?`,
-        icon: 'question',
-        showCancelButton: true,
-        showDenyButton: true,
-        confirmButtonText: 'Dejar en Bus 2 (Sentado)',
-        denyButtonText: 'Quitar del transporte',
-        cancelButtonText: 'Cancelar'
-    });
-
-    if (res.isConfirmed) {
-        try {
-            await window.db.from('usuarios').update({
-                asiento: null,
-                estado_viaje: 'asignado'
-            }).eq('id', usuarioId);
-            window.personasAsignacion = null;
-            await pintarAsignacion();
-            notificarCambioAsiento(viajeId, actual.transporte_id);
-            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pasado a cupo regular en Bus 2', showConfirmButton: false, timer: 2000 });
-        } catch (e) {
-            Swal.fire('Error', 'No se pudo actualizar.', 'error');
-        }
-    } else if (res.isDenied) {
-        try {
-            await window.db.from('usuarios').update({
-                transporte_id: null,
-                asiento: null,
-                estado_viaje: 'anotado'
-            }).eq('id', usuarioId);
-            window.personasAsignacion = null;
-            await pintarAsignacion();
-            notificarCambioAsiento(viajeId, null);
-            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Quitado del transporte', showConfirmButton: false, timer: 2000 });
-        } catch (e) {
-            Swal.fire('Error', 'No se pudo quitar.', 'error');
-        }
+    const designado = actual.estado_viaje === 'sin_respaldo' || esAsientoSinRespaldo(actual.asiento);
+    if (designado) {
+        const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', usuarioId);
+        if (error) return Swal.fire('No se quitó', 'No se pudo actualizar a la persona.', 'error');
+    } else {
+        const ya = (window.personasAsignacion || []).filter((u) => u.transporte_id === actual.transporte_id && u.id !== usuarioId && (u.estado_viaje === 'sin_respaldo' || esAsientoSinRespaldo(u.asiento))).length;
+        if (ya >= 2) return Swal.fire('Cupo completo', 'En este microbús ya están designadas las dos personas de los asientos sin respaldar.', 'warning');
+        const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'sin_respaldo', fecha_reserva: null }).eq('id', usuarioId);
+        if (error) return Swal.fire('No se designó', 'No se pudo actualizar a la persona.', 'error');
     }
+    window.personasAsignacion = null;
+    await pintarAsignacion();
+    notificarCambioAsiento(actual.viaje_id, actual.transporte_id);
 }
-
-window.asignarParadoSlot = asignarParadoSlot;
-window.quitarParado = quitarParado;
-window.asignarComoParado = asignarComoParado;
 
 function cargarBiblioteca() {
     const cont = document.getElementById('lista-biblioteca');
@@ -2449,7 +2215,7 @@ async function verRutaActiva(viajeId, soloMarcadores, cambiarTab = false) {
 
     // Ubicaciones GPS en tiempo real de unidades en ruta (si están transmitiendo)
     try {
-        const { data: trans } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viajeId);
+        const { data: trans } = await window.db.from('transportes').select('id, tipo, creado_en').eq('viaje_id', viajeId);
         if (trans && trans.length) {
             const transIds = trans.map(t => t.id);
             const { data: logs } = await window.db.from('gps_logs').select('*').in('transporte_id', transIds).order('actualizado_en', { ascending: false }).limit(30);
@@ -2670,8 +2436,8 @@ async function cargarOperacion() {
     window.rutaOperacion = puntosDeRuta(viaje.ruta);
     pintarEstadoOperacion(viaje.estado);
     dibujarRutaOperacion();
-    const { data: unidades } = await window.db.from('transportes').select('id, tipo').eq('viaje_id', viaje.id);
-    window.operacionUnidades = unidades || [];
+    const { data: unidades } = await window.db.from('transportes').select('id, tipo, creado_en').eq('viaje_id', viaje.id);
+    window.operacionUnidades = ordenarTransportesVisible(unidades || []);
     window.operacionUnidades.forEach((t) => {
         unidad.innerHTML += `<option value="${t.id}">${escaparHtml(etiquetaTransporte(t, window.operacionUnidades))}</option>`;
     });
@@ -2844,6 +2610,18 @@ async function operacionIniciar() {
     });
     if (!resp.isConfirmed) return;
 
+    const puntos = puntosDeRuta(window.rutaOperacion);
+    const puntoClave = regreso ? puntos[puntos.length - 1] : puntos[0];
+    const cerca = await validarCercaDePunto(
+        puntoClave,
+        50,
+        regreso ? 'Muy lejos del punto de regreso' : 'Muy lejos del punto de inicio',
+        regreso
+            ? 'Para iniciar el regreso debe estar a 50 metros o menos del punto de retorno. Las paradas intermedias no cuentan.'
+            : 'Para iniciar la ida debe estar a 50 metros o menos del punto de partida. Las paradas intermedias no cuentan.'
+    );
+    if (!cerca) return;
+
     const estado = regreso ? 'en_ruta_vuelta' : 'en_ruta_ida';
     const { error } = await window.db.from('viajes').update({ estado: estado }).eq('id', viajeId);
     if (error) return Swal.fire('No se inició', 'No se pudo cambiar el estado del viaje.', 'error');
@@ -2961,8 +2739,8 @@ async function cargarControlAsistencia(forzar) {
     const viajeActual = (window.asistenciaViajes || []).find((v) => v.id === viajeId);
     window.asistenciaRuta = viajeActual ? puntosDeRuta(viajeActual.ruta) : [];
 
-    const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeId).order('creado_en', { ascending: true });
-    window.asistenciaTransportes = transportes || [];
+    const { data: transportes } = await window.db.from('transportes').select('*').eq('viaje_id', viajeId);
+    window.asistenciaTransportes = ordenarTransportesVisible(transportes || []);
 
     const { data: pasajeros } = await window.db.from('usuarios')
         .select('id, nombre_completo, email, telefono, dni, asiento, parada_id, abordo, asistencia_cancelada, transporte_id, rol')
@@ -3026,6 +2804,86 @@ async function cargarControlAsistencia(forzar) {
     renderVistaAsistencia();
 }
 
+window.asistenciaVista = 'unidad';
+
+function cambiarVistaAsistencia(modo) {
+    window.asistenciaVista = modo === 'parada' ? 'parada' : 'unidad';
+    const btnUnidad = document.getElementById('asist-modo-unidad');
+    const btnParada = document.getElementById('asist-modo-parada');
+    if (btnUnidad) {
+        btnUnidad.classList.toggle('btn-primary', window.asistenciaVista === 'unidad');
+        btnUnidad.classList.toggle('btn-outline', window.asistenciaVista !== 'unidad');
+    }
+    if (btnParada) {
+        btnParada.classList.toggle('btn-primary', window.asistenciaVista === 'parada');
+        btnParada.classList.toggle('btn-outline', window.asistenciaVista !== 'parada');
+    }
+    renderVistaAsistencia();
+}
+
+function filaAsistencia(p) {
+    const parada = leerParada(p.parada_id, window.asistenciaRuta);
+    const estadoBadge = p.abordo
+        ? '<span style="color:#10b981; font-weight:700; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:4px 12px; border-radius:12px;">A bordo</span>'
+        : '<span style="color:#ef4444; font-weight:700; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); padding:4px 12px; border-radius:12px;">Aún no está dentro</span>';
+    const btnAccion = p.abordo
+        ? `<button type="button" class="btn btn-outline btn-auto" style="color:#ef4444; border-color:#ef4444; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', false)">Marcar no dentro</button>`
+        : `<button type="button" class="btn btn-primary btn-auto" style="background:#10b981; border-color:#10b981; padding:4px 10px; font-size:0.8rem;" onclick="cambiarAbordoSuper('${p.id}', true)">Marcar a bordo</button>`;
+    const unidad = (window.asistenciaTransportes || []).find((t) => t.id === p.transporte_id);
+    return `<tr style="${p.abordo ? 'background:rgba(16,185,129,0.02);' : ''}">
+        <td><div style="font-weight:600;">${escaparHtml(p.nombre_completo)}</div><div style="font-size:0.8rem; color:var(--text-light);">${escaparHtml(p.email || p.dni || '')}</div></td>
+        <td>${escaparHtml(unidad ? etiquetaTransporte(unidad, window.asistenciaTransportes) : 'Sin transporte')}</td>
+        <td><span class="badge" style="background:var(--border); color:var(--text-color);">${escaparHtml(p.asiento || '—')}</span></td>
+        <td style="text-align:center;">${estadoBadge}</td>
+        <td style="text-align:center;">${btnAccion}</td>
+    </tr>`;
+}
+
+function renderAsistenciaPorParada() {
+    const container = document.getElementById('asist-unidades-container');
+    const tabsBox = document.getElementById('asist-tabs-unidades');
+    if (tabsBox) tabsBox.style.display = 'none';
+    if (!container) return;
+    const busq = window.asistenciaBusqueda || '';
+    const ruta = window.asistenciaRuta || [];
+    const grupos = new Map();
+    ruta.forEach((punto, idx) => {
+        const nombre = (punto.nombre || ('Parada ' + (idx + 1))).trim();
+        if (!grupos.has(nombre.toLowerCase())) grupos.set(nombre.toLowerCase(), { nombre: nombre, gente: [] });
+    });
+    const sinParada = [];
+    (window.asistenciaPasajeros || []).forEach((p) => {
+        if (busq && !((p.nombre_completo || '').toLowerCase().includes(busq) || (p.dni || '').toLowerCase().includes(busq) || (p.email || '').toLowerCase().includes(busq))) return;
+        const parada = leerParada(p.parada_id, ruta);
+        const nombre = parada && parada.nombre ? parada.nombre.trim() : '';
+        if (!nombre) {
+            sinParada.push(p);
+            return;
+        }
+        const clave = nombre.toLowerCase();
+        if (!grupos.has(clave)) grupos.set(clave, { nombre: nombre, gente: [] });
+        grupos.get(clave).gente.push(p);
+    });
+    let html = '';
+    grupos.forEach((grupo) => {
+        const abordo = grupo.gente.filter((p) => p.abordo).length;
+        html += `<div style="background:#fff; border:1px solid var(--border); border-radius:12px; margin-bottom:1.25rem; overflow:hidden;">
+            <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                <h4 style="margin:0;">${escaparHtml(grupo.nombre)}</h4>
+                <span style="font-weight:700;">${abordo} a bordo · ${grupo.gente.length - abordo} pendientes · ${grupo.gente.length} en total</span>
+            </div>
+            <div class="table-responsive" style="margin:0;"><table style="margin:0; width:100%;"><thead><tr><th>Estudiante</th><th>Transporte</th><th>Asiento</th><th style="text-align:center;">Estado</th><th style="text-align:center;">Asistencia</th></tr></thead><tbody>
+            ${grupo.gente.length ? grupo.gente.map(filaAsistencia).join('') : '<tr><td colspan="5" style="text-align:center; padding:1rem;">Nadie indicó esta parada.</td></tr>'}
+            </tbody></table></div></div>`;
+    });
+    html += `<div style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; margin-bottom:1.25rem; overflow:hidden;">
+        <div style="padding:1rem 1.25rem;"><h4 style="margin:0; color:#b45309;">Sin parada de subida (${sinParada.length})</h4></div>
+        <div class="table-responsive" style="margin:0;"><table style="margin:0; width:100%;"><thead><tr><th>Estudiante</th><th>Transporte</th><th>Asiento</th><th style="text-align:center;">Estado</th><th style="text-align:center;">Asistencia</th></tr></thead><tbody>
+        ${sinParada.length ? sinParada.map(filaAsistencia).join('') : '<tr><td colspan="5" style="text-align:center; padding:1rem;">Todos indicaron una parada.</td></tr>'}
+        </tbody></table></div></div>`;
+    container.innerHTML = html;
+}
+
 function filtrarListaAsistencia() {
     const input = document.getElementById('asist-buscar');
     window.asistenciaBusqueda = input ? input.value.toLowerCase().trim() : '';
@@ -3033,6 +2891,12 @@ function filtrarListaAsistencia() {
 }
 
 function renderVistaAsistencia(filtroTab) {
+    if (window.asistenciaVista === 'parada') {
+        renderAsistenciaPorParada();
+        return;
+    }
+    const tabsBoxModo = document.getElementById('asist-tabs-unidades');
+    if (tabsBoxModo) tabsBoxModo.style.display = 'flex';
     if (filtroTab !== undefined) {
         window.asistenciaFiltroTab = filtroTab;
         const tabsBox = document.getElementById('asist-tabs-unidades');
@@ -3091,11 +2955,8 @@ function renderVistaAsistencia(filtroTab) {
         const abordo = pasajerosUnidad.filter((p) => p.abordo).length;
         const faltantes = pasajerosUnidad.length - abordo;
 
-        const icono = t.tipo === 'moto' ? '🏍️' : (t.tipo === 'microbus_16' ? '🚐' : '🚌');
-
-        const busesAsist = (window.asistenciaTransportes || []).filter(x => x.tipo === 'bus_50');
-        const esBus2Asist = busesAsist.length >= 2 && busesAsist[1].id === t.id;
-        const textoCapacidad = esBus2Asist ? '54 plazas (50 sentados + 4 de pie)' : (plazasPorTipo(t.tipo) + ' plazas');
+        const icono = t.tipo === 'moto' ? '🏍️' : ((t.tipo === 'microbus_16' || t.tipo === 'microbus_15') ? '🚐' : '🚌');
+        const textoCapacidad = plazasPorTipo(t.tipo) + ' plazas';
 
         html += `
             <div style="background:var(--card-bg, #ffffff); border:1px solid var(--border); border-radius:12px; margin-bottom:1.5rem; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
@@ -3243,9 +3104,135 @@ async function cambiarAbordoSuper(usuarioId, nuevoEstado) {
     });
 }
 
+function descargarPdfAsistencia() {
+    const viajeId = (document.getElementById('asist-viaje') || {}).value || window.asistenciaViajeId;
+    const viaje = (window.asistenciaViajes || []).find((v) => v.id === viajeId);
+    const pasajeros = window.asistenciaPasajeros || [];
+    const unidades = ordenarTransportesVisible(window.asistenciaTransportes || []);
+    if (!viaje) return Swal.fire('Viaje', 'Seleccione un viaje antes de descargar el registro.', 'warning');
+    if (!unidades.length && !pasajeros.length) return Swal.fire('Sin datos', 'Este viaje no tiene transportes ni pasajeros para imprimir.', 'info');
+    if (!window.jspdf || !window.jspdf.jsPDF) return Swal.fire('PDF', 'No se pudo cargar el generador de PDF. Revise su conexión e intente de nuevo.', 'error');
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const margen = 12;
+    const ancho = doc.internal.pageSize.getWidth();
+    let fechaTxt = '';
+    if (viaje.fecha_salida) {
+        const fecha = new Date(viaje.fecha_salida);
+        fechaTxt = isNaN(fecha.getTime()) ? String(viaje.fecha_salida) : fecha.toLocaleDateString('es-SV', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    doc.setFillColor(12, 35, 64);
+    doc.rect(0, 0, ancho, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('Registro de asistencia', margen, 12);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(String(viaje.titulo || 'Viaje'), margen, 19);
+    if (fechaTxt) doc.text(fechaTxt, margen, 24.5);
+
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(8.5);
+    const leyenda = [
+        'Marque a mano el día del viaje. Cada casilla es un abordaje distinto.',
+        'Asistencia 1: al inicio, cuando la persona aborda.',
+        'Asistencia 2: después de recoger basura, al abordar de nuevo el bus.',
+        'Asistencia 3: en Tortuga Verde, al abordar para regresar a la universidad.'
+    ];
+    let y = 34;
+    leyenda.forEach((linea) => {
+        doc.text(linea, margen, y);
+        y += 4.2;
+    });
+    y += 2;
+
+    const encabezado = ['N°', 'Nombre completo', 'Teléfono', 'Punto de abordaje', 'Asist. 1', 'Asist. 2', 'Asist. 3'];
+    const grupos = unidades.map((t) => ({
+        titulo: etiquetaTransporte(t, unidades) + ' · ' + nombreTipoTransporte(t.tipo),
+        gente: pasajeros.filter((p) => p.transporte_id === t.id)
+    }));
+    const sinUnidad = pasajeros.filter((p) => !p.transporte_id || !unidades.some((t) => t.id === p.transporte_id));
+    if (sinUnidad.length) grupos.push({ titulo: 'Sin transporte asignado', gente: sinUnidad });
+
+    const filaDe = (p, indice) => {
+        const parada = leerParada(p.parada_id, window.asistenciaRuta);
+        return [
+            String(indice),
+            p.nombre_completo || 'Sin nombre',
+            p.telefono || '—',
+            parada && parada.nombre ? parada.nombre : 'Sin indicar',
+            ' ',
+            ' ',
+            ' '
+        ];
+    };
+
+    grupos.forEach((grupo) => {
+        const gente = grupo.gente.slice().sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo), 'es'));
+        const cuerpo = gente.length
+            ? gente.map((p, i) => filaDe(p, i + 1))
+            : [['', 'Sin pasajeros asignados', '', '', '', '', '']];
+        if (y > 250) {
+            doc.addPage();
+            y = 16;
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(12, 35, 64);
+        doc.text(grupo.titulo, margen, y);
+        doc.autoTable({
+            startY: y + 2,
+            margin: { left: margen, right: margen },
+            head: [encabezado],
+            body: cuerpo,
+            theme: 'grid',
+            styles: { font: 'helvetica', fontSize: 8.5, textColor: [15, 23, 42], lineColor: [203, 213, 225], lineWidth: 0.2, cellPadding: 1.8, valign: 'middle' },
+            headStyles: { fillColor: [12, 35, 64], textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
+            columnStyles: {
+                0: { cellWidth: 12, halign: 'center' },
+                1: { cellWidth: 50 },
+                2: { cellWidth: 28 },
+                3: { cellWidth: 40 },
+                4: { cellWidth: 18, halign: 'center' },
+                5: { cellWidth: 18, halign: 'center' },
+                6: { cellWidth: 18, halign: 'center' }
+            },
+            didDrawCell: (data) => {
+                if (data.section !== 'body' || data.column.index < 4 || data.cell.raw !== ' ') return;
+                const lado = 4;
+                const x = data.cell.x + (data.cell.width - lado) / 2;
+                const cy = data.cell.y + (data.cell.height - lado) / 2;
+                doc.setDrawColor(15, 23, 42);
+                doc.setLineWidth(0.35);
+                doc.rect(x, cy, lado, lado);
+            }
+        });
+        y = doc.lastAutoTable.finalY + 10;
+    });
+
+    const paginas = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= paginas; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('OmniTravel · verificación manual el día del viaje', margen, 290);
+        doc.text('Página ' + i + ' de ' + paginas, ancho - margen, 290, { align: 'right' });
+    }
+
+    const nombreArchivo = 'asistencia-' + String(viaje.titulo || 'viaje').replace(/[^\w\s-áéíóúñÁÉÍÓÚÑ]/g, '').trim().replace(/\s+/g, '-') + '.pdf';
+    doc.save(nombreArchivo);
+}
+
+window.marcarSinRespaldo = marcarSinRespaldo;
+window.descargarPdfAsistencia = descargarPdfAsistencia;
 window.cargarControlAsistencia = cargarControlAsistencia;
 window.renderVistaAsistencia = renderVistaAsistencia;
 window.cambiarAbordoSuper = cambiarAbordoSuper;
+window.cambiarVistaAsistencia = cambiarVistaAsistencia;
 window.filtrarListaAsistencia = filtrarListaAsistencia;
 
 // Inicializar

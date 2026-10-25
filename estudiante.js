@@ -115,7 +115,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             const btnCancAsis = document.getElementById('btn-cancelar-asistencia');
             const asisBadge = document.getElementById('asistencia-badge');
 
-            if (session.transporte_id && (estado === 'asiento_elegido' || estado === 'asignado')) {
+            if (session.transporte_id && (estado === 'asiento_elegido' || estado === 'asignado' || estado === 'sin_respaldo')) {
                 if (panelAsistencia) panelAsistencia.style.display = 'block';
                 if (session.abordo) {
                     if (btnAsis) btnAsis.style.display = 'none';
@@ -193,35 +193,9 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 if (guia) guia.innerHTML = '<strong>Paso actual: espera de transporte</strong><p>Ya está anotado. El superadministrador indicará la unidad. Cuando eso ocurra podrá reservar asiento y, después, la parada de subida.</p>';
                 cargarMiembrosGenerales(viaje.id);
             }
-            const esParado = session.asiento && String(session.asiento).startsWith('Parado');
             const cardCroquis = document.getElementById('card-croquis-asientos');
-            const cardParado = document.getElementById('card-usuario-parado');
 
-            if (esParado) {
-                // LOS USUARIOS PARADOS NO TIENEN ACCESO AL CROQUIS
-                document.getElementById('panel-croquis').style.display = 'block';
-                if (cardCroquis) cardCroquis.style.display = 'none';
-                if (cardParado) {
-                    cardParado.style.display = 'block';
-                    const slotTxt = document.getElementById('parado-slot-txt');
-                    if (slotTxt) slotTxt.innerText = session.asiento;
-                }
-                if (panelParada) panelParada.style.display = 'block';
-                document.getElementById('v-transporte').style.color = 'var(--text)';
-                if (window.seatTimerInterval) clearInterval(window.seatTimerInterval);
-
-                cargarMiembros(session.transporte_id);
-                cargarMiembrosGenerales(viaje.id);
-
-                if (guia) {
-                    const parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta));
-                    guia.innerHTML = parada
-                        ? `<strong>Registro del viaje completo</strong><p>Viajas de pie en esta unidad (${escaparHtml(session.asiento)}) y parada confirmada en <b>${escaparHtml(parada.nombre || 'confirmada')}</b>. El día de la salida confirma tu asistencia.</p>`
-                        : `<strong>Paso actual: parada de subida</strong><p>Viajas de pie (${escaparHtml(session.asiento)}). No requieres reservar asiento en el croquis. <b>Indica abajo la parada donde vas a subir</b>.</p>`;
-                }
-            }
-            else if (estado === 'asignado' || estado === 'asiento_elegido') {
-                if (cardParado) cardParado.style.display = 'none';
+            if (estado === 'asignado' || estado === 'asiento_elegido' || estado === 'sin_respaldo') {
                 if (cardCroquis) cardCroquis.style.display = 'block';
                 document.getElementById('panel-croquis').style.display = 'block';
                 document.getElementById('v-transporte').style.color = 'var(--text)';
@@ -250,7 +224,9 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         timerDiv.className = 'aviso aviso-info';
                         timerDiv.innerHTML = `La selección de asientos abre en ${d} d, ${h} h, ${m} min, ${s} s.`;
                         croquisDiv.innerHTML = `<div class="text-center text-muted" style="margin:20px;">El croquis se habilita al abrir la selección.</div>`;
-                        if (guia && estado === 'asignado') guia.innerHTML = '<strong>Paso actual: espera de asientos</strong><p>Ya tiene transporte. Podrá elegir asiento cuando abra el horario indicado arriba.</p>';
+                        if (guia && (estado === 'asignado' || estado === 'sin_respaldo')) guia.innerHTML = estado === 'sin_respaldo'
+                            ? '<strong>Paso actual: asiento sin respaldar</strong><p>Le corresponden solo los asientos ' + textoAsientosSinRespaldo() + '. No tienen respaldar: son para sentarse.</p>'
+                            : '<strong>Paso actual: espera de asientos</strong><p>Ya tiene transporte. Podrá elegir asiento cuando abra el horario indicado arriba.</p>';
                     }
                     else if (now >= inicio && now <= cierre) {
                         const diff = cierre - now;
@@ -263,7 +239,9 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-ok';
                         timerDiv.innerHTML = `Selección abierta. Cierra en ${d > 0 ? d + ' d, ' : ''}${h} h, ${m} min, ${s} s.`;
-                        if (guia && estado === 'asignado') guia.innerHTML = '<strong>Paso actual: reserva de asiento</strong><p>Elija un asiento libre en el croquis. La parada de subida se habilita después.</p>';
+                        if (guia && (estado === 'asignado' || estado === 'sin_respaldo')) guia.innerHTML = estado === 'sin_respaldo'
+                            ? '<strong>Paso actual: asiento sin respaldar</strong><p>Elija el ' + textoAsientosSinRespaldo().replace(' y ', ' o el ') + '. No tienen respaldar. La parada de subida se habilita después.</p>'
+                            : '<strong>Paso actual: reserva de asiento</strong><p>Elija un asiento libre en el croquis. La parada de subida se habilita después.</p>';
                         
                         if(!window.croquisRendered) {
                             renderCroquisEstudiante(viaje.id, session.transporte_id);
@@ -391,10 +369,8 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     // Si alguien más tomó asiento o el admin asignó a alguien
                     else if(window.currentViajeId && session.transporte_id) {
                         window.croquisRendered = false;
-                        lastOccupiedStr = ""; // Forzar recargo
+                        lastOccupiedStr = "";
                         renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
-                        cargarMiembros(session.transporte_id);
-                        cargarMiembrosGenerales(window.currentViajeId);
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, () => {
@@ -492,15 +468,19 @@ async function cargarMiembros(transporteId) {
     }
 }
 
+let firmaListaGeneral = '';
 async function cargarMiembrosGenerales(viajeId) {
     const contenedor = document.getElementById('lista-general');
     if(!contenedor) return;
-    contenedor.innerHTML = '';
     const { data: usuarios } = await window.db.from('usuarios')
         .select('nombre_completo, foto_perfil, rol')
         .eq('viaje_id', viajeId)
         .in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
     
+    const firma = (usuarios || []).map((u) => u.nombre_completo + '|' + (u.rol || '')).sort().join(';');
+    if (firma === firmaListaGeneral && contenedor.childElementCount) return;
+    firmaListaGeneral = firma;
+    contenedor.innerHTML = '';
     if(usuarios && usuarios.length > 0) {
         usuarios.forEach(u => {
             const src = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
@@ -521,25 +501,10 @@ function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
     debouncedCroquisTimer = setTimeout(() => {
         if (forzar) lastOccupiedStr = "";
         renderCroquisEstudiante(viajeId, transporteId);
-        cargarMiembros(transporteId);
-        cargarMiembrosGenerales(viajeId);
     }, 250);
 }
 
 async function renderCroquisEstudiante(viajeId, transporteId) {
-    // Si el usuario viaja de pie, NO TIENE ACCESO AL CROQUIS
-    if (session.asiento && String(session.asiento).startsWith('Parado')) {
-        const cardCroquis = document.getElementById('card-croquis-asientos');
-        if (cardCroquis) cardCroquis.style.display = 'none';
-        const cardParado = document.getElementById('card-usuario-parado');
-        if (cardParado) {
-            cardParado.style.display = 'block';
-            const slotTxt = document.getElementById('parado-slot-txt');
-            if (slotTxt) slotTxt.innerText = session.asiento;
-        }
-        return;
-    }
-
     const croquisDiv = document.getElementById('croquis');
     if (!croquisDiv) return;
     
@@ -554,31 +519,31 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
     occupiedIds.push('MINE:' + (session.asiento || 'none'));
     const occupiedStr = JSON.stringify(occupiedIds);
 
-    if (croquisDiv.innerHTML !== '' && lastOccupiedStr === occupiedStr) return; // Evitar parpadeos si no hay cambios
+    window.tipoTransporteEstudiante = t.tipo;
+    const totalPlazasPrevias = plazasPorTipo(t.tipo);
+    const formaLista = croquisFormaLista(croquisDiv, totalPlazasPrevias);
+    if (formaLista && croquisDiv.innerHTML !== '' && lastOccupiedStr === occupiedStr) return; // Evitar parpadeos si no hay cambios
     lastOccupiedStr = occupiedStr;
 
     if(usuarios) {
         usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; }); window.asientosOcupadosEstudiante = asientosOcupadosInfo;
     }
 
-    const miAsiento = session.asiento;
-    let standingBanner = '';
-    if (miAsiento && String(miAsiento).startsWith('Parado')) {
-        standingBanner = `<div class="aviso aviso-info" style="margin-bottom:1rem;"><strong>Lugar de pie asignado:</strong> Tienes asignado el lugar <b>${escaparHtml(miAsiento)}</b> en el Transporte 2. Tu registro en el viaje está confirmado.</div>`;
-    }
+    const miAsiento = session.asiento && String(session.asiento).startsWith('Parado') ? null : session.asiento;
+    const standingBanner = '';
 
     const totalPlazas = plazasPorTipo(t.tipo);
     const seatEls = croquisDiv.querySelectorAll('.seat-v');
 
     // Actualización ultra rápida en-sitio (in-place) sin parpadeo si los asientos ya están en pantalla
-    if (seatEls.length === totalPlazas) {
+    if (formaLista && seatEls.length === totalPlazas) {
         seatEls.forEach((el) => {
             const span = el.querySelector('span');
             const n = span ? parseInt(span.innerText) : null;
             if (!n) return;
             const esMio = (miAsiento == n.toString());
             const ocupante = asientosOcupados[n.toString()];
-            el.className = 'seat-v';
+            el.className = 'seat-v' + (totalPlazas === 18 && esAsientoSinRespaldo(n) ? ' seat-banco' : '');
             if (esMio) {
                 el.classList.add('selected');
                 el.setAttribute('onclick', `selectSeat(this, ${n}, '')`);
@@ -606,7 +571,7 @@ function genSeat(numero, ocupadosInfo, miAsiento) {
     const esMio = (miAsiento == numero.toString());
     const ocupante = ocupadosInfo[numero.toString()];
     
-    let clase = 'seat-v';
+    let clase = 'seat-v' + ((window.tipoTransporteEstudiante === 'microbus_16' || window.tipoTransporteEstudiante === 'microbus_15') && esAsientoSinRespaldo(numero) ? ' seat-banco' : '');
     let ocupanteNombre = '';
     
     if(esMio) {
@@ -624,9 +589,22 @@ function genSeat(numero, ocupadosInfo, miAsiento) {
     return `<div class="${clase}" onclick="selectSeat(this, ${numero}, '${ocupanteNombre}')"><span>${numero}</span></div>`;
 }
 
+function esAsientoBanco(numero) {
+    return esAsientoSinRespaldo(numero);
+}
+
+function designadoSinRespaldo() {
+    return session.estado_viaje === 'sin_respaldo' || esAsientoSinRespaldo(session.asiento);
+}
+
 function selectSeat(seatElement, numero, ocupanteNombre) {
-    if (session.asiento && String(session.asiento).startsWith('Parado')) {
-        return Swal.fire('Viaje de pie', 'Has sido asignado para viajar de pie en esta unidad. No requieres ni tienes acceso a reservar un asiento en el croquis.', 'info');
+    const tipo = window.tipoTransporteEstudiante || '';
+    const micro = tipo === 'microbus_16' || tipo === 'microbus_15';
+    if (micro && designadoSinRespaldo() && !esAsientoBanco(numero)) {
+        return Swal.fire('Asiento sin respaldar', 'Le corresponden solo los asientos ' + textoAsientosSinRespaldo() + '. No tienen respaldar: son para sentarse.', 'info');
+    }
+    if (micro && !designadoSinRespaldo() && esAsientoBanco(numero)) {
+        return Swal.fire('No disponible', 'Los asientos ' + textoAsientosSinRespaldo() + ' no tienen respaldar y están reservados para las dos personas designadas. Elija otro asiento.', 'info');
     }
     if (!window.seleccionAsientosAbierta) {
         return Swal.fire('Fuera de horario', 'La selección de asientos no está abierta.', 'info');
@@ -645,10 +623,12 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: 'asignado', fecha_reserva: null }).eq('id', session.id);
+                    const vuelveBanco = esAsientoSinRespaldo(session.asiento);
+                    const estadoLibre = vuelveBanco ? 'sin_respaldo' : 'asignado';
+                    const { error } = await window.db.from('usuarios').update({ asiento: null, estado_viaje: estadoLibre, fecha_reserva: null }).eq('id', session.id);
                     if (error) throw error;
                     session.asiento = null;
-                    session.estado_viaje = 'asignado';
+                    session.estado_viaje = estadoLibre;
                     localStorage.setItem('omni_user', JSON.stringify(session));
                     Swal.fire('Asiento liberado', 'Puede elegir otro dentro del horario.', 'success');
                     notificarCambioAsiento(window.currentViajeId, session.transporte_id);
@@ -659,16 +639,9 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         return;
     }
 
-    // Identificar el asiento contiguo (pareja de limpieza)
-    const parejaNumero = (numero % 2 === 1) ? numero + 1 : numero - 1;
-    const ocupanteParejaObj = window.asientosOcupadosEstudiante && window.asientosOcupadosEstudiante[parejaNumero.toString()];
-    const estadoParejaHtml = ocupanteParejaObj 
-        ? `<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 10px; margin-top:10px; font-size:0.88rem; color:#166534;">
-             👥 <b>Asiento contiguo (${parejaNumero}):</b> Reservado por <b>${escaparHtml(ocupanteParejaObj.nombre_completo)}</b>. ¡Será tu pareja para la limpieza!
-           </div>`
-        : `<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; margin-top:10px; font-size:0.88rem; color:#475569;">
-             👥 <b>Asiento contiguo (${parejaNumero}):</b> Disponible por ahora. Quien lo elija será tu pareja de trabajo.
-           </div>`;
+    const textoPareja = textoParejaAsiento(numero, tipo, window.asientosOcupadosEstudiante);
+    const avisoBanco = micro && esAsientoBanco(numero) ? '<p><b>Este asiento no tiene respaldar.</b> Solo es para sentarse.</p>' : '';
+    const estadoParejaHtml = `<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; margin-top:10px; font-size:0.88rem; color:#334155;">${escaparHtml(textoPareja)}</div>`;
 
     if (session.asiento) {
         Swal.fire({
@@ -676,6 +649,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
             html: `
                 <div style="text-align: left; font-size: 0.95rem; line-height: 1.5;">
                     <p>Tu asiento anterior (<b>${session.asiento}</b>) quedará libre para otros compañeros.</p>
+                    ${avisoBanco}
                     <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 10px 12px; border-radius: 4px; margin-top: 10px;">
                         <p style="margin: 0; color: #1e40af; font-weight: 600;">🤝 Actividad en Parejas (Jornada de Limpieza):</p>
                         <p style="margin: 4px 0 0 0; color: #1e3a8a; font-size: 0.88rem;">
@@ -694,11 +668,11 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         }).then(async (res) => {
             if(res.isConfirmed) {
                 try {
-                    const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', session.transporte_id).eq('asiento', numero.toString()).neq('id', session.id).limit(1);
-                    if (check && check.length > 0) {
+                    const libre = await puedeTomarAsiento(session.id, session.transporte_id, numero);
+                    if (!libre.ok) {
                         lastOccupiedStr = "";
                         renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
-                        return Swal.fire('No disponible', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                        return Swal.fire('No disponible', libre.motivo, 'warning');
                     }
                     const { error } = await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                     if (error) throw error;
@@ -723,6 +697,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         html: `
             <div style="text-align: left; font-size: 0.95rem; line-height: 1.5;">
                 <p>Estás seleccionando el <b>Asiento ${numero}</b>.</p>
+                ${avisoBanco}
                 <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 10px 12px; border-radius: 4px; margin-top: 10px;">
                     <p style="margin: 0; color: #1e40af; font-weight: 600;">🤝 Actividad en Parejas (Jornada de Limpieza):</p>
                     <p style="margin: 4px 0 0 0; color: #1e3a8a; font-size: 0.88rem;">
@@ -742,10 +717,8 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
         if(res.isConfirmed) {
             try {
                 // Doble check para prevenir colisión (race condition)
-                const { data: check } = await window.db.from('usuarios').select('id').eq('transporte_id', session.transporte_id).eq('asiento', numero.toString()).limit(1);
-                if (check && check.length > 0) {
-                    return Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
-                }
+                const libre = await puedeTomarAsiento(session.id, session.transporte_id, numero);
+                if (!libre.ok) return Swal.fire('No disponible', libre.motivo, 'warning');
 
                 const { error } = await window.db.from('usuarios').update({
                     asiento: numero.toString(),
@@ -776,10 +749,25 @@ function geometriaActiva() {
     return puntosDeRuta(ruta || []);
 }
 
-function llenarSelectorParadas(puntos) {
+async function llenarSelectorParadas(puntos) {
     const selectParadas = document.getElementById('parada-select');
     if (!selectParadas) return;
     const lista = puntosDeRuta(puntos);
+    if (window.currentViajeId && window.db) {
+        try {
+            const { data: extras } = await window.db.from('paradas').select('nombre, latitud, longitud').eq('viaje_id', window.currentViajeId);
+            (extras || []).forEach((p) => {
+                const lat = Number(p.latitud);
+                const lng = Number(p.longitud);
+                if (!isFinite(lat) || !isFinite(lng)) return;
+                const ya = lista.some((r) => {
+                    const mismoNombre = r.nombre && p.nombre && r.nombre.trim().toLowerCase() === p.nombre.trim().toLowerCase();
+                    return mismoNombre || distanciaMetros(Number(r.lat), Number(r.lng), lat, lng) < 40;
+                });
+                if (!ya) lista.push({ lat: lat, lng: lng, nombre: p.nombre || 'Parada aprobada', origen: 'ruta' });
+            });
+        } catch (e) { /* la ruta del viaje sigue siendo la lista principal */ }
+    }
     const actual = leerParada(session.parada_id, lista);
     selectParadas.innerHTML = '<option value="">Seleccione una parada</option>';
     lista.forEach((r) => {
@@ -947,7 +935,7 @@ async function consultarSolicitudParada() {
 
 loadEstudianteDashboard();
 
-// ====== ASISTENCIA DE ESTUDIANTE (SIN GPS) ======
+// ====== ASISTENCIA DE ESTUDIANTE ======
 async function marcarAsistencia(abordo) {
     if (!session.id) return;
     const viaje = window.currentViajeData;
@@ -985,6 +973,19 @@ async function marcarAsistencia(abordo) {
             });
             if (!confirm.isConfirmed) return;
         }
+
+        let parada = leerParada(session.parada_id, puntosDeRuta(viaje.ruta)) || session.parada_detalle;
+        if ((!parada || !isFinite(Number(parada.lat))) && session.parada_id) {
+            try {
+                const { data: filaParada } = await window.db.from('paradas').select('nombre, latitud, longitud').eq('id', session.parada_id).maybeSingle();
+                if (filaParada) parada = { lat: Number(filaParada.latitud), lng: Number(filaParada.longitud), nombre: filaParada.nombre };
+            } catch (e) { /* se valida abajo */ }
+        }
+        if (!parada || !isFinite(Number(parada.lat)) || !isFinite(Number(parada.lng))) {
+            return Swal.fire('Parada de subida', 'Primero indique la parada en la que se va a subir. Solo puede elegir las paradas guardadas en este viaje.', 'warning');
+        }
+        const cerca = await validarCercaDePunto(parada, 50, 'Lejos de su parada', 'Para marcar que ya abordó debe estar a 50 metros o menos de ' + (parada.nombre || 'su parada de subida') + '.');
+        if (!cerca) return;
 
         try {
             await window.db.from('usuarios').update({ abordo: true, asistencia_cancelada: false }).eq('id', session.id);

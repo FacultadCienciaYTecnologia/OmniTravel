@@ -2,13 +2,13 @@ const MARGEN_RUTA_METROS = 50;
 
 function plazasPorTipo(tipo) {
     if (tipo === 'bus_50') return 50;
-    if (tipo === 'microbus_16' || tipo === 'microbus_15') return 16;
+    if (tipo === 'microbus_16' || tipo === 'microbus_15') return 18;
     return 2;
 }
 
 function nombreTipoTransporte(tipo) {
     if (tipo === 'bus_50') return 'Autobús (50 plazas)';
-    if (tipo === 'microbus_16' || tipo === 'microbus_15') return 'Microbús (16 plazas)';
+    if (tipo === 'microbus_16' || tipo === 'microbus_15') return 'Microbús (18 plazas)';
     return 'Motocicleta (2 plazas)';
 }
 
@@ -16,6 +16,39 @@ function escaparHtml(valor) {
     return String(valor == null ? '' : valor).replace(/[&<>"']/g, (c) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[c]));
+}
+
+function pedirUbicacionPrecisa() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error('sin gps'));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    });
+}
+
+async function validarCercaDePunto(punto, metros, titulo, detalle) {
+    const lat = Number(punto && (punto.lat != null ? punto.lat : punto[0]));
+    const lng = Number(punto && (punto.lng != null ? punto.lng : punto[1]));
+    if (!isFinite(lat) || !isFinite(lng)) {
+        if (window.Swal) await Swal.fire('Punto', 'Ese punto del recorrido no tiene coordenadas.', 'warning');
+        return false;
+    }
+    let pos;
+    try {
+        pos = await pedirUbicacionPrecisa();
+    } catch (e) {
+        if (window.Swal) await Swal.fire('Ubicación', 'Active el GPS del dispositivo. Sin su ubicación no se puede continuar.', 'warning');
+        return false;
+    }
+    const dist = distanciaMetros(pos.coords.latitude, pos.coords.longitude, lat, lng);
+    if (dist > metros) {
+        const base = detalle || ('Debe estar a ' + metros + ' metros o menos.');
+        if (window.Swal) await Swal.fire(titulo || 'Muy lejos', base + ' Ahora está a unos ' + Math.round(dist) + ' m.', 'warning');
+        return false;
+    }
+    return true;
 }
 
 function distanciaMetros(aLat, aLng, bLat, bLng) {
@@ -103,21 +136,37 @@ function conModoGps(puntos) {
     return puntosDeRuta(puntos);
 }
 
+function ordenarTransportes(lista) {
+    return (lista || []).slice().sort((a, b) => {
+        const fa = Date.parse(a && a.creado_en) || 0;
+        const fb = Date.parse(b && b.creado_en) || 0;
+        if (fa !== fb) return fb - fa;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+}
+
+function ordenarTransportesVisible(lista) {
+    const peso = (tipo) => {
+        if (tipo === 'bus_50') return 0;
+        if (tipo === 'microbus_16' || tipo === 'microbus_15') return 1;
+        return 2;
+    };
+    return ordenarTransportes(lista).sort((a, b) => peso(a.tipo) - peso(b.tipo));
+}
+
 function etiquetaTransporte(transporte, listaTransportes) {
     if (!transporte) return 'Sin asignar';
-    const lista = listaTransportes || [];
+    const lista = ordenarTransportes(listaTransportes);
     const todosMismoTipo = lista.filter(t => t.tipo === transporte.tipo);
     const indexTipo = todosMismoTipo.findIndex(t => t.id === transporte.id);
     const num = indexTipo >= 0 ? indexTipo + 1 : 1;
-    
-    if (transporte.tipo === 'bus_50') {
-        return `Bus ${num}`;
-    }
+
+    if (transporte.tipo === 'bus_50') return 'Bus ' + num;
     if (transporte.tipo === 'microbus_16' || transporte.tipo === 'microbus_15') {
-        return todosMismoTipo.length > 1 ? `Microbús ${num}` : 'Microbús';
+        return todosMismoTipo.length > 1 ? 'Microbús ' + num : 'Microbús';
     }
     if (transporte.tipo === 'moto' || transporte.tipo === 'moto_2') {
-        return todosMismoTipo.length > 1 ? `Motocicleta ${num}` : 'Motocicletas';
+        return todosMismoTipo.length > 1 ? 'Moto ' + num : 'Moto';
     }
     return nombreTipoTransporte(transporte.tipo);
 }
@@ -145,17 +194,103 @@ function normalizarPuntos(lista) {
     })).filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number');
 }
 
+function parejaDeAsiento(numero, tipo) {
+    const n = parseInt(numero, 10);
+    if (!n) return null;
+    if (tipo === 'bus_50') {
+        if (n === 3) return 48;
+        if (n === 48) return 3;
+        if (n === 1) return 2;
+        if (n === 2) return 1;
+        if (n >= 4 && n <= 45) return n % 2 === 0 ? n + 1 : n - 1;
+        return null;
+    }
+    if (tipo === 'microbus_16' || tipo === 'microbus_15') {
+        const pares = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 7: 8, 8: 7, 9: 10, 10: 9, 11: 12, 12: 11, 13: 14, 14: 13, 15: 16, 16: 15, 17: 18, 18: 17 };
+        return pares[n] || null;
+    }
+    return null;
+}
+
+function asientosSinRespaldo() {
+    return [7, 11];
+}
+
+function esAsientoSinRespaldo(numero) {
+    return asientosSinRespaldo().indexOf(parseInt(numero, 10)) !== -1;
+}
+
+function textoAsientosSinRespaldo() {
+    const a = asientosSinRespaldo();
+    return a[0] + ' y ' + a[1];
+}
+
+function textoParejaAsiento(numero, tipo, ocupantes) {
+    const n = parseInt(numero, 10);
+    const pareja = parejaDeAsiento(n, tipo);
+    if (tipo === 'bus_50' && (n === 46 || n === 47 || n === 49 || n === 50)) {
+        return 'Este puesto es de las autoridades. Con quién trabaja ese día se define en el lugar.';
+    }
+    if (!pareja) return 'La persona sentada a su lado será su pareja de trabajo.';
+    const ocupante = ocupantes && ocupantes[String(pareja)];
+    const quien = ocupante && ocupante.nombre_completo ? ocupante.nombre_completo : 'todavía libre';
+    if (n === 3 || n === 48) {
+        return 'Su pareja de trabajo es el asiento ' + pareja + ' (' + quien + '). El asiento 3 va con el 48.';
+    }
+    return 'Su pareja de trabajo es quien ocupe el asiento ' + pareja + ' (' + quien + ').';
+}
+
+function croquisFormaLista(croquisDiv, plazas) {
+    if (!croquisDiv) return false;
+    if (plazas === 50) return !!croquisDiv.querySelector('.bus-v');
+    if (plazas === 18) return !!croquisDiv.querySelector('.micro-v');
+    return true;
+}
+
+async function puedeTomarAsiento(usuarioId, transporteId, numero) {
+    const { data: ocupante } = await window.db.from('usuarios').select('id, nombre_completo').eq('transporte_id', transporteId).eq('asiento', String(numero)).neq('id', usuarioId).limit(1);
+    if (ocupante && ocupante.length) {
+        return { ok: false, motivo: 'Ese asiento ya lo tiene ' + (ocupante[0].nombre_completo || 'otra persona') + '.' };
+    }
+    const { data: yo } = await window.db.from('usuarios').select('asiento, transporte_id').eq('id', usuarioId).maybeSingle();
+    if (yo && yo.asiento && yo.transporte_id && yo.transporte_id !== transporteId) {
+        return { ok: false, motivo: 'Ya tiene el asiento ' + yo.asiento + ' en otra unidad. Libérelo antes de tomar uno aquí. Cada persona tiene un solo asiento.' };
+    }
+    return { ok: true };
+}
+
 function htmlAsientos(plazas, celda) {
     const frente = `<div class="bus-h-col bus-h-front"><span class="bus-h-frente">Frente</span><div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Chofer</span></div>`;
     if (plazas === 2) {
         return `<div class="croquis-scroll"><div class="bus-h bus-h-corto">${frente}</div><div class="bus-h-col">${celda(1)}${celda(2)}</div></div></div>`;
     }
-    if (plazas === 16) {
-        return `<div class="croquis-scroll"><div class="bus-h">${frente}${celda(1)}${celda(2)}${celda(3)}</div>
-            <div class="bus-h-col bus-h-lado">${celda(4)}${celda(5)}${celda(6)}</div>
-            <div class="bus-h-col">${celda(7)}<div class="bus-h-aisle"></div>${celda(8)}${celda(9)}</div>
-            <div class="bus-h-col">${celda(10)}<div class="bus-h-aisle"></div>${celda(11)}${celda(12)}</div>
-            <div class="bus-h-col">${celda(13)}${celda(14)}${celda(15)}${celda(16)}</div>
+    if (plazas === 18) {
+        const banco = (n) => `<div class="micro-v-banco"><span>Sin respaldar</span>${celda(n)}</div>`;
+        const fondo = [13, 14, 15, 16, 17, 18].map((n) => celda(n)).join('');
+        return `<div class="croquis-scroll"><div class="micro-v">
+            <span class="micro-v-frente">Frente</span>
+            <div class="micro-v-fila">
+                <div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Conductor</span></div>
+                ${celda(1)}${celda(2)}
+            </div>
+            <div class="micro-v-fila">${celda(3)}${celda(4)}<span class="micro-v-puerta">Puerta</span></div>
+            <div class="micro-v-fila">${celda(5)}${celda(6)}${banco(7)}${celda(8)}</div>
+            <div class="micro-v-fila">${celda(9)}${celda(10)}${banco(11)}${celda(12)}</div>
+            <div class="micro-v-fondo">${fondo}</div>
+        </div><p class="aviso aviso-info" style="margin-top:8px;">Los asientos 7 y 11 van en el pasillo. No tienen respaldar: solo son para sentarse. Quedan reservados para las dos personas designadas.</p></div>`;
+    }
+    if (plazas === 50) {
+        const fila = (izq, der) => `<div class="bus-v-row"><div class="bus-v-group">${izq}</div><div class="bus-v-aisle"></div><div class="bus-v-group">${der}</div></div>`;
+        let filas = fila(celda(1) + celda(2), celda(3));
+        for (let n = 4; n <= 40; n += 4) {
+            filas += fila(celda(n) + celda(n + 1), celda(n + 2) + celda(n + 3));
+        }
+        filas += fila(celda(44) + celda(45), '');
+        const fondo = [46, 47, 48, 49, 50].map((n) => celda(n)).join('');
+        return `<div class="croquis-scroll"><div class="bus-v">
+            <div class="bus-v-frente"><div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Conductor</span></div><span class="bus-v-puerta">Puerta</span></div>
+            ${filas}
+            <div class="bus-v-fondo">${fondo}</div>
         </div></div>`;
     }
     let cols = '';
@@ -317,6 +452,25 @@ function suscribirAsientosEnVivo(callback) {
     return () => listenersAsientos.delete(callback);
 }
 
+const firmasCroquis = {};
+
+function pintarCroquisVivo(croquisDiv, plazas, clave, occupiedStr, htmlNuevo, aplicarCelda) {
+    if (!croquisDiv) return;
+    const asientos = croquisDiv.querySelectorAll('.seat-v');
+    const formaLista = croquisFormaLista(croquisDiv, plazas);
+    if (formaLista && firmasCroquis[clave] === occupiedStr && asientos.length === plazas) return;
+    firmasCroquis[clave] = occupiedStr;
+    if (formaLista && asientos.length === plazas) {
+        asientos.forEach((el) => {
+            const span = el.querySelector('span');
+            const n = span ? parseInt(span.innerText, 10) : 0;
+            if (n) aplicarCelda(el, n);
+        });
+        return;
+    }
+    croquisDiv.innerHTML = htmlNuevo;
+}
+
 function notificarCambioAsiento(viajeId, transporteId) {
     try {
         const canal = iniciarCanalAsientos();
@@ -426,16 +580,26 @@ function trazarRutaConCalles(mapa, puntos, opciones = {}) {
 }
 
 window.MARGEN_RUTA_METROS = MARGEN_RUTA_METROS;
+window.parejaDeAsiento = parejaDeAsiento;
+window.esAsientoSinRespaldo = esAsientoSinRespaldo;
+window.textoAsientosSinRespaldo = textoAsientosSinRespaldo;
+window.textoParejaAsiento = textoParejaAsiento;
+window.croquisFormaLista = croquisFormaLista;
+window.puedeTomarAsiento = puedeTomarAsiento;
 window.plazasPorTipo = plazasPorTipo;
 window.nombreTipoTransporte = nombreTipoTransporte;
 window.escaparHtml = escaparHtml;
 window.distanciaMetros = distanciaMetros;
+window.validarCercaDePunto = validarCercaDePunto;
+window.pintarCroquisVivo = pintarCroquisVivo;
 window.leerParada = leerParada;
 window.puntoSobreRuta = puntoSobreRuta;
 window.puntosDeRuta = puntosDeRuta;
 window.modoGpsDe = modoGpsDe;
 window.conModoGps = conModoGps;
 window.etiquetaTransporte = etiquetaTransporte;
+window.ordenarTransportes = ordenarTransportes;
+window.ordenarTransportesVisible = ordenarTransportesVisible;
 window.clasificarSolicitud = clasificarSolicitud;
 window.esLecturaMasNueva = esLecturaMasNueva;
 window.normalizarPuntos = normalizarPuntos;
