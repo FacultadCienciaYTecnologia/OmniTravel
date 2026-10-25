@@ -150,6 +150,7 @@ async function loadDashboard() {
         const pendientes = users.filter(u => u.estado_aprobacion === 'pendiente');
         
         document.getElementById('stat-usuarios').innerText = aprobados.length;
+        pintarBotonMantenimiento();
         
         if (pendientes.length > 0) {
             document.getElementById('badge-pendientes').style.display = 'inline';
@@ -3227,6 +3228,35 @@ function descargarPdfAsistencia() {
     doc.save(nombreArchivo);
 }
 
+async function pintarBotonMantenimiento() {
+    const btn = document.getElementById('btn-mantenimiento');
+    if (!btn) return;
+    const activo = await mantenimientoActivo();
+    btn.innerText = activo ? 'Quitar mantenimiento' : 'Página en mantenimiento';
+    btn.className = activo ? 'btn btn-outline btn-auto' : 'btn btn-danger btn-auto';
+}
+
+async function alternarMantenimiento() {
+    const activo = await mantenimientoActivo();
+    const aviso = activo
+        ? 'Estudiantes y administradores podrán entrar de nuevo.'
+        : 'Estudiantes y administradores verán la página en mantenimiento y no podrán usar el sistema. Usted sigue entrando.';
+    const res = await Swal.fire({
+        title: activo ? '¿Abrir la página?' : '¿Poner la página en mantenimiento?',
+        text: aviso,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: activo ? 'Sí, abrir' : 'Sí, cerrar la página',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!res.isConfirmed) return;
+    const guardado = await fijarMantenimiento(!activo);
+    if (!guardado.ok) return Swal.fire('No se aplicó', 'No se pudo guardar el mantenimiento.', 'error');
+    await pintarBotonMantenimiento();
+    Swal.fire(activo ? 'Página abierta' : 'Página en mantenimiento', activo ? 'El sistema ya está disponible.' : 'Quedó cerrada para el resto de usuarios.', 'success');
+}
+
+window.alternarMantenimiento = alternarMantenimiento;
 window.marcarSinRespaldo = marcarSinRespaldo;
 window.descargarPdfAsistencia = descargarPdfAsistencia;
 window.cargarControlAsistencia = cargarControlAsistencia;

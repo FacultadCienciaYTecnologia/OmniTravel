@@ -3,6 +3,7 @@ const session = JSON.parse(localStorage.getItem('omni_user'));
 if (!session || session.rol !== 'estudiante') {
     window.location.href = 'index.html';
 }
+vigilarMantenimiento();
 document.getElementById('user-name-display').innerText = `Hola, ${session.nombre_completo}`;
 const profilePic = document.getElementById('nav-profile-pic');
 if(profilePic) {
@@ -34,6 +35,10 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 return;
             }
             if(user) {
+                if (user.rol !== 'superadmin' && user.estado_aprobacion !== 'aprobado') {
+                    cerrarSesionNoAprobada();
+                    return;
+                }
                 if(user.rol !== 'estudiante') {
                     Object.assign(session, user);
                     localStorage.setItem('omni_user', JSON.stringify(session));
@@ -352,6 +357,10 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     
                     // Si mi propio usuario fue modificado por el admin/superadmin (ej. asignación de vehículo o cambio de rol)
                     if (payload.new && payload.new.id === session.id) {
+                        if (payload.new.rol !== 'superadmin' && payload.new.estado_aprobacion !== 'aprobado') {
+                            cerrarSesionNoAprobada();
+                            return;
+                        }
                         if(payload.new.rol !== 'estudiante') {
                             Object.assign(session, payload.new);
                             localStorage.setItem('omni_user', JSON.stringify(session));

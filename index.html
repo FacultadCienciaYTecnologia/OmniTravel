@@ -73,7 +73,22 @@
     <script src="app.js"></script>
     <script>
         // === AUTO LOGIN (Sesión de 24 horas) ===
-        document.addEventListener('DOMContentLoaded', () => {
+        function avisoMantenimientoLogin() {
+            if (document.getElementById('pantalla-mantenimiento')) return;
+            const capa = document.createElement('div');
+            capa.id = 'pantalla-mantenimiento';
+            capa.setAttribute('role', 'alert');
+            capa.style.cssText = 'position:fixed;inset:0;z-index:200000;background:#0c2340;color:#fff;display:flex;align-items:center;justify-content:center;padding:28px;text-align:center;font-family:"Source Sans 3",sans-serif;';
+            capa.innerHTML = '<div style="max-width:440px;"><p style="letter-spacing:.08em;text-transform:uppercase;color:#d4c4a8;font-weight:700;margin:0 0 12px;">OmniTravel</p><h1 style="font-size:1.8rem;margin:0 0 12px;">Página en mantenimiento</h1><p style="margin:0;line-height:1.5;color:#d5dde6;">El sistema está cerrado temporalmente. Vuelva a intentar más tarde.</p></div>';
+            document.body.appendChild(capa);
+        }
+
+        async function sitioEnMantenimiento() {
+            const { data } = await window.db.from('usuarios').select('id').eq('departamento', '__mantenimiento__').limit(1);
+            return !!(data && data.length);
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
             const userStr = localStorage.getItem('omni_user');
             const sessionTime = localStorage.getItem('omni_session_time');
             
@@ -83,12 +98,24 @@
                 
                 if (diffHoras < 24) {
                     const data = JSON.parse(userStr);
-                    // Redirigir silenciosamente
+                    if (data.rol !== 'superadmin') {
+                        const { data: fresco } = await window.db.from('usuarios').select('rol, estado_aprobacion').eq('id', data.id).maybeSingle();
+                        if (!fresco || (fresco.rol !== 'superadmin' && fresco.estado_aprobacion !== 'aprobado')) {
+                            localStorage.removeItem('omni_user');
+                            localStorage.removeItem('omni_session_time');
+                            Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
+                            return;
+                        }
+                        if (await sitioEnMantenimiento()) {
+                            avisoMantenimientoLogin();
+                            return;
+                        }
+                        data.rol = fresco.rol;
+                    }
                     if (data.rol === 'superadmin') window.location.href = 'superadmin.html';
                     else if (data.rol === 'admin') window.location.href = 'admin.html';
                     else window.location.href = 'estudiante.html';
                 } else {
-                    // Sesión expirada, limpiar
                     localStorage.removeItem('omni_user');
                     localStorage.removeItem('omni_session_time');
                 }
@@ -137,6 +164,12 @@
                 if (error) throw error;
 
                 if (data) {
+                    if (data.rol !== 'superadmin' && await sitioEnMantenimiento()) {
+                        avisoMantenimientoLogin();
+                        btn.disabled = false;
+                        btn.innerText = "Ingresar al Sistema";
+                        return;
+                    }
                     // Si es estudiante o admin, verificar aprobación
                     if (data.rol !== 'superadmin' && data.estado_aprobacion !== 'aprobado') {
                         Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');

@@ -659,7 +659,7 @@ th {
 }
 .micro-v-fondo {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 4px;
     margin-top: 4px;
     padding-top: 8px;

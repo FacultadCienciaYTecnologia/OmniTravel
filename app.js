@@ -782,6 +782,15 @@ async function loginDetectFaceLoop(video) {
                         return;
                     }
 
+                    if (matchedUser.rol !== 'superadmin') {
+                        const { data: marcaMant } = await window.db.from('usuarios').select('id').eq('departamento', '__mantenimiento__').limit(1);
+                        if (marcaMant && marcaMant.length) {
+                            stopCamera();
+                            Swal.fire('Página en mantenimiento', 'El sistema está cerrado temporalmente. Vuelva a intentar más tarde.', 'info');
+                            return;
+                        }
+                    }
+
                     // Obtener perfil completo actualizado
                     const { data: fullUser } = await window.db.from('usuarios').select('*').eq('id', matchedUser.id).single();
                     const sessionData = fullUser || matchedUser;

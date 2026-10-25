@@ -3,6 +3,7 @@ const session = JSON.parse(localStorage.getItem('omni_user'));
 if (!session || session.rol !== 'admin') {
     window.location.href = 'index.html';
 }
+vigilarMantenimiento();
 document.getElementById('admin-name').innerText = `Admin: ${session.nombre_completo}`;
 const profilePic = document.getElementById('nav-profile-pic');
 if(profilePic) {
@@ -35,6 +36,10 @@ async function loadAdminDashboard() {
             return;
         }
         if(user) {
+            if (user.estado_aprobacion !== 'aprobado') {
+                cerrarSesionNoAprobada();
+                return;
+            }
             if(user.rol !== 'admin') {
                 Object.assign(session, user);
                 localStorage.setItem('omni_user', JSON.stringify(session));
@@ -206,6 +211,10 @@ async function loadAdminDashboard() {
                     }
 
                     if (payload.new && payload.new.id === session.id) {
+                        if (payload.new.estado_aprobacion !== 'aprobado') {
+                            cerrarSesionNoAprobada();
+                            return;
+                        }
                         if(payload.new.rol !== 'admin') {
                             Object.assign(session, payload.new);
                             localStorage.setItem('omni_user', JSON.stringify(session));

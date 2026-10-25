@@ -206,14 +206,14 @@ function parejaDeAsiento(numero, tipo) {
         return null;
     }
     if (tipo === 'microbus_16' || tipo === 'microbus_15') {
-        const pares = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 7: 8, 8: 7, 9: 10, 10: 9, 11: 12, 12: 11, 13: 14, 14: 13, 15: 16, 16: 15, 17: 18, 18: 17 };
+        const pares = { 1: 2, 2: 1, 3: 4, 4: 3, 6: 7, 7: 6, 8: 9, 9: 8, 10: 11, 11: 10, 12: 13, 13: 12, 14: 15, 15: 14, 16: 17, 17: 16 };
         return pares[n] || null;
     }
     return null;
 }
 
 function asientosSinRespaldo() {
-    return [7, 11];
+    return [8, 12];
 }
 
 function esAsientoSinRespaldo(numero) {
@@ -243,7 +243,7 @@ function textoParejaAsiento(numero, tipo, ocupantes) {
 function croquisFormaLista(croquisDiv, plazas) {
     if (!croquisDiv) return false;
     if (plazas === 50) return !!croquisDiv.querySelector('.bus-v');
-    if (plazas === 18) return !!croquisDiv.querySelector('.micro-v');
+    if (plazas === 18) return !!croquisDiv.querySelector('.micro-v-fila-pasillo');
     return true;
 }
 
@@ -266,18 +266,18 @@ function htmlAsientos(plazas, celda) {
     }
     if (plazas === 18) {
         const banco = (n) => `<div class="micro-v-banco"><span>Sin respaldar</span>${celda(n)}</div>`;
-        const fondo = [13, 14, 15, 16, 17, 18].map((n) => celda(n)).join('');
+        const fondo = [14, 15, 16, 17, 18].map((n) => celda(n)).join('');
         return `<div class="croquis-scroll"><div class="micro-v">
             <span class="micro-v-frente">Frente</span>
             <div class="micro-v-fila">
                 <div class="puesto-chofer"><div class="steering-wheel-v"></div><span>Conductor</span></div>
                 ${celda(1)}${celda(2)}
             </div>
-            <div class="micro-v-fila">${celda(3)}${celda(4)}<span class="micro-v-puerta">Puerta</span></div>
-            <div class="micro-v-fila">${celda(5)}${celda(6)}${banco(7)}${celda(8)}</div>
-            <div class="micro-v-fila">${celda(9)}${celda(10)}${banco(11)}${celda(12)}</div>
+            <div class="micro-v-fila micro-v-fila-pasillo">${celda(3)}${celda(4)}<span class="micro-v-puerta">Pasillo</span>${celda(5)}</div>
+            <div class="micro-v-fila">${celda(6)}${celda(7)}${banco(8)}${celda(9)}</div>
+            <div class="micro-v-fila">${celda(10)}${celda(11)}${banco(12)}${celda(13)}</div>
             <div class="micro-v-fondo">${fondo}</div>
-        </div><p class="aviso aviso-info" style="margin-top:8px;">Los asientos 7 y 11 van en el pasillo. No tienen respaldar: solo son para sentarse. Quedan reservados para las dos personas designadas.</p></div>`;
+        </div><p class="aviso aviso-info" style="margin-top:8px;">Los asientos ${textoAsientosSinRespaldo()} van en el pasillo. No tienen respaldar: solo son para sentarse. Quedan reservados para las dos personas designadas.</p></div>`;
     }
     if (plazas === 50) {
         const fila = (izq, der) => `<div class="bus-v-row"><div class="bus-v-group">${izq}</div><div class="bus-v-aisle"></div><div class="bus-v-group">${der}</div></div>`;
@@ -579,6 +579,69 @@ function trazarRutaConCalles(mapa, puntos, opciones = {}) {
     return polyline;
 }
 
+const MARCA_MANTENIMIENTO = '__mantenimiento__';
+
+async function mantenimientoActivo() {
+    const { data, error } = await window.db.from('usuarios').select('id').eq('departamento', MARCA_MANTENIMIENTO).limit(1);
+    if (error) return false;
+    return !!(data && data.length);
+}
+
+function mostrarPantallaMantenimiento() {
+    if (document.getElementById('pantalla-mantenimiento')) return;
+    const capa = document.createElement('div');
+    capa.id = 'pantalla-mantenimiento';
+    capa.setAttribute('role', 'alert');
+    capa.style.cssText = 'position:fixed;inset:0;z-index:200000;background:#0c2340;color:#fff;display:flex;align-items:center;justify-content:center;padding:28px;text-align:center;font-family:"Source Sans 3",sans-serif;';
+    capa.innerHTML = '<div style="max-width:440px;"><p style="letter-spacing:.08em;text-transform:uppercase;color:#d4c4a8;font-weight:700;margin:0 0 12px;">OmniTravel</p><h1 style="font-size:1.8rem;margin:0 0 12px;">Página en mantenimiento</h1><p style="margin:0;line-height:1.5;color:#d5dde6;">El sistema está cerrado temporalmente. Vuelva a intentar más tarde.</p></div>';
+    document.body.appendChild(capa);
+}
+
+function vigilarMantenimiento() {
+    const revisar = async () => {
+        try {
+            const activo = await mantenimientoActivo();
+            if (activo) mostrarPantallaMantenimiento();
+            else if (document.getElementById('pantalla-mantenimiento')) window.location.reload();
+        } catch (e) {}
+    };
+    revisar();
+    setInterval(revisar, 8000);
+}
+
+async function fijarMantenimiento(activo) {
+    const sesion = JSON.parse(localStorage.getItem('omni_user') || '{}');
+    if (!sesion.id) return { ok: false };
+    if (activo) {
+        const { data: actual } = await window.db.from('usuarios').select('departamento').eq('id', sesion.id).maybeSingle();
+        if (actual && actual.departamento !== MARCA_MANTENIMIENTO) {
+            localStorage.setItem('omni_depto_previo', actual.departamento || '');
+        }
+        const { error } = await window.db.from('usuarios').update({ departamento: MARCA_MANTENIMIENTO }).eq('id', sesion.id);
+        return { ok: !error };
+    }
+    const previo = localStorage.getItem('omni_depto_previo') || null;
+    const { data: marcados } = await window.db.from('usuarios').select('id').eq('departamento', MARCA_MANTENIMIENTO);
+    for (const fila of marcados || []) {
+        const valor = fila.id === sesion.id ? previo : null;
+        const { error } = await window.db.from('usuarios').update({ departamento: valor }).eq('id', fila.id);
+        if (error) return { ok: false };
+    }
+    localStorage.removeItem('omni_depto_previo');
+    return { ok: true };
+}
+
+function cerrarSesionNoAprobada() {
+    localStorage.removeItem('omni_user');
+    localStorage.removeItem('omni_session_time');
+    window.location.replace('index.html');
+}
+
+window.mantenimientoActivo = mantenimientoActivo;
+window.mostrarPantallaMantenimiento = mostrarPantallaMantenimiento;
+window.vigilarMantenimiento = vigilarMantenimiento;
+window.fijarMantenimiento = fijarMantenimiento;
+window.cerrarSesionNoAprobada = cerrarSesionNoAprobada;
 window.MARGEN_RUTA_METROS = MARGEN_RUTA_METROS;
 window.parejaDeAsiento = parejaDeAsiento;
 window.esAsientoSinRespaldo = esAsientoSinRespaldo;
