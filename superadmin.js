@@ -1400,14 +1400,13 @@ async function pintarAsignacion(usarCache) {
         tbody.innerHTML = '<tr><td colspan="4">Seleccione un viaje.</td></tr>';
         return;
     }
-    if (!usarCache || !window.personasAsignacion) {
+    if (!usarCache || !window.personasAsignacion || window.personasAsignacionViaje !== viajeId) {
         const consultaT = window.db.from('transportes').select('id, tipo, viaje_id, creado_en').eq('viaje_id', viajeId);
-        const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje, estado_aprobacion, asiento').eq('rol', 'estudiante');
-        const consultaV = window.db.from('viajes').select('id, titulo');
-        const [tRes, pRes, vRes] = await Promise.all([consultaT, consultaP, consultaV]);
+        const consultaP = window.db.from('usuarios').select('id, nombre_completo, dni, rol, viaje_id, transporte_id, estado_viaje, estado_aprobacion, asiento').eq('viaje_id', viajeId);
+        const [tRes, pRes] = await Promise.all([consultaT, consultaP]);
         window.transportesAsignacion = tRes.data || [];
         window.personasAsignacion = pRes.data || [];
-        if (vRes.data) window.viajesAsignacion = vRes.data;
+        window.personasAsignacionViaje = viajeId;
     }
     const transportes = ordenarTransportesVisible(window.transportesAsignacion || []);
     const q = ((document.getElementById('asig-buscar') || {}).value || '').trim().toLowerCase();
@@ -1463,9 +1462,15 @@ async function pintarAsignacion(usarCache) {
     }
 
     if (!lista.length) {
+        const firmaVacia = viajeId + '|' + filtroVal + '|' + q + '|vacio';
+        if (window.firmaAsignacion === firmaVacia) return;
+        window.firmaAsignacion = firmaVacia;
         tbody.innerHTML = '<tr><td colspan="4">No hay estudiantes en este filtro.</td></tr>';
         return;
     }
+    const firma = viajeId + '|' + filtroVal + '|' + q + '|' + lista.map((u) => [u.id, u.transporte_id || '', u.asiento || '', u.estado_viaje || ''].join(':')).join(';');
+    if (firma === window.firmaAsignacion) return;
+    window.firmaAsignacion = firma;
     const tituloViaje = (id) => {
         const v = (window.viajesAsignacion || []).find((x) => x.id === id);
         return v ? v.titulo : 'Otro viaje';

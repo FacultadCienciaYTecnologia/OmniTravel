@@ -200,6 +200,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     
                     if (now < inicio) {
                         window.seleccionAsientosAbierta = false;
+                        window.croquisRendered = false;
                         const diff = inicio - now;
                         const d = Math.floor(diff / (1000 * 60 * 60 * 24));
                         const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -208,7 +209,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-info';
                         timerDiv.innerHTML = `La selección de asientos abre en ${d} d, ${h} h, ${m} min, ${s} s.`;
-                        croquisDiv.innerHTML = `<div class="text-center text-muted" style="margin:20px;">El croquis se habilita al abrir la selección.</div>`;
+                        ocultarCroquisCerrado(croquisDiv);
                         if (guia && (estado === 'asignado' || estado === 'sin_respaldo')) guia.innerHTML = estado === 'sin_respaldo'
                             ? '<strong>Paso actual: asiento sin respaldar</strong><p>Le corresponden solo los asientos ' + textoAsientosSinRespaldo() + '. No tienen respaldar: son para sentarse.</p>'
                             : '<strong>Paso actual: espera de asientos</strong><p>Ya tiene transporte. Podrá elegir asiento cuando abra el horario indicado arriba.</p>';
@@ -221,6 +222,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         const s = Math.floor((diff % (1000 * 60)) / 1000);
                         
                         window.seleccionAsientosAbierta = true;
+                        mostrarCroquisAbierto(croquisDiv);
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-ok';
                         timerDiv.innerHTML = `Selección abierta. Cierra en ${d > 0 ? d + ' d, ' : ''}${h} h, ${m} min, ${s} s.`;
@@ -235,19 +237,11 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     } 
                     else {
                         window.seleccionAsientosAbierta = false;
+                        window.croquisRendered = false;
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-cerrado';
                         timerDiv.innerHTML = 'El periodo de selección ha finalizado.';
-                        
-                        if(estado !== 'asiento_elegido') {
-                            croquisDiv.innerHTML = `<p class="text-center" style="margin:20px;">Ya no puedes seleccionar asiento.</p>`;
-                        } else {
-                            // Ya eligió, mostrar croquis de solo lectura
-                            if(!window.croquisRendered) {
-                                renderCroquisEstudiante(viaje.id, session.transporte_id);
-                                window.croquisRendered = true;
-                            }
-                        }
+                        ocultarCroquisCerrado(croquisDiv);
                     }
                 }
                 
@@ -356,7 +350,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         loadEstudianteDashboard(true);
                     }  
                     // Si alguien más tomó asiento o el admin asignó a alguien
-                    else if(window.currentViajeId && session.transporte_id) {
+                    else if(window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id) {
                         window.croquisRendered = false;
                         lastOccupiedStr = "";
                         renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
@@ -394,14 +388,14 @@ async function loadEstudianteDashboard(skipFetch = false) {
             if (!window.subAsientosRegistradaEstudiante) {
                 window.subAsientosRegistradaEstudiante = true;
                 suscribirAsientosEnVivo(() => {
-                    if (window.currentViajeId && session.transporte_id) {
+                    if (window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id) {
                         debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
                 });
 
                 if (window.croquisInterval) clearInterval(window.croquisInterval);
                 window.croquisInterval = setInterval(() => {
-                    if (window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
+                    if (window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
                         debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
                 }, 3500);
@@ -484,17 +478,44 @@ let croquisInterval = null;
 let lastOccupiedStr = "";
 
 let debouncedCroquisTimer = null;
+function leyendaCroquis() {
+    const card = document.getElementById('card-croquis-asientos');
+    return card ? card.querySelector('.legend') : null;
+}
+
+function ocultarCroquisCerrado(croquisDiv) {
+    const caja = croquisDiv || document.getElementById('croquis');
+    if (caja) {
+        caja.style.display = 'none';
+        caja.innerHTML = '';
+    }
+    const leyenda = leyendaCroquis();
+    if (leyenda) leyenda.style.display = 'none';
+    lastOccupiedStr = '';
+}
+
+function mostrarCroquisAbierto(croquisDiv) {
+    const caja = croquisDiv || document.getElementById('croquis');
+    if (caja) caja.style.display = '';
+    const leyenda = leyendaCroquis();
+    if (leyenda) leyenda.style.display = '';
+}
+
 function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
+    if (!window.seleccionAsientosAbierta) return;
     if (debouncedCroquisTimer) clearTimeout(debouncedCroquisTimer);
     debouncedCroquisTimer = setTimeout(() => {
+        if (!window.seleccionAsientosAbierta) return;
         if (forzar) lastOccupiedStr = "";
         renderCroquisEstudiante(viajeId, transporteId);
     }, 250);
 }
 
 async function renderCroquisEstudiante(viajeId, transporteId) {
+    if (!window.seleccionAsientosAbierta) return;
     const croquisDiv = document.getElementById('croquis');
     if (!croquisDiv) return;
+    mostrarCroquisAbierto(croquisDiv);
     
     const { data: t } = await window.db.from('transportes').select('tipo').eq('id', transporteId).single();
     if(!t) return;
