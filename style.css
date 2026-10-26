@@ -667,6 +667,17 @@ th {
 }
 .seat-v.seat-banco { border-style: dashed; border-color: #9a6b12; background: #fbf6ea; }
 
+.integrante-nombre {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--navy);
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+.integrante-personal { border-color: #6e3030; color: #6e3030; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 0.8rem; font-size: 0.85rem; color: var(--text); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-box { width: 14px; height: 14px; border: 1px solid #9aa8b5; }

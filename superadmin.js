@@ -1986,19 +1986,7 @@ async function revertirParadaAprobada(id) {
 
     try {
         await window.db.from('paradas_intermitentes').update({ estado: 'rechazada' }).eq('id', id);
-        if (p.usuario_id) {
-            await window.db.from('usuarios').update({ parada_id: null }).eq('id', p.usuario_id);
-        }
-        if (p.viaje_id) {
-            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
-            if (viaje && Array.isArray(viaje.ruta)) {
-                const rutaLimpia = viaje.ruta.filter(pt => {
-                    if (!pt || typeof pt.lat !== 'number') return true;
-                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
-                });
-                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
-            }
-        }
+        if (p.viaje_id) await retirarParadaSolicitada(p.viaje_id, p);
         Swal.fire('Parada Revertida', 'La parada ha quedado rechazada y se retiró del recorrido.', 'success');
         cargarSolicitudesSuper();
         if (typeof loadDashboard === 'function') loadDashboard();
@@ -2023,16 +2011,7 @@ async function eliminarSolicitudParada(id) {
 
     try {
         const { data: p } = await window.db.from('paradas_intermitentes').select('*').eq('id', id).maybeSingle();
-        if (p && p.estado === 'aprobada' && p.viaje_id) {
-            const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', p.viaje_id).single();
-            if (viaje && Array.isArray(viaje.ruta)) {
-                const rutaLimpia = viaje.ruta.filter(pt => {
-                    if (!pt || typeof pt.lat !== 'number') return true;
-                    return distanciaMetros(pt.lat, pt.lng, Number(p.lat), Number(p.lng)) > 75;
-                });
-                await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', p.viaje_id);
-            }
-        }
+        if (p && p.estado === 'aprobada' && p.viaje_id) await retirarParadaSolicitada(p.viaje_id, p);
         await window.db.from('paradas_intermitentes').delete().eq('id', id);
         Swal.fire('Eliminada', 'La solicitud ha sido eliminada.', 'success');
         cargarSolicitudesSuper();

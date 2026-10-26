@@ -353,7 +353,8 @@ function insertarPuntoEnRuta(puntos, nuevoPunto) {
         lat: nLat,
         lng: nLng,
         nombre: nuevoPunto.nombre || 'Parada',
-        tiempo: nuevoPunto.tiempo || ''
+        tiempo: nuevoPunto.tiempo || '',
+        origen: nuevoPunto.origen || ''
     };
 
     if (lista.length < 2) {
@@ -373,6 +374,78 @@ function insertarPuntoEnRuta(puntos, nuevoPunto) {
 
     lista.splice(mejorIdx + 1, 0, item);
     return lista;
+}
+
+function nombresParadaIguales(a, b) {
+    const na = String(a || '').trim().toLowerCase();
+    const nb = String(b || '').trim().toLowerCase();
+    return !!(na && nb && na === nb);
+}
+
+function detalleDeParada(detalle) {
+    if (!detalle) return null;
+    if (typeof detalle === 'object') return detalle;
+    try { return JSON.parse(detalle); } catch (e) { return null; }
+}
+
+async function retirarParadaSolicitada(viajeId, solicitud) {
+    if (!viajeId || !solicitud || !window.db) return;
+    const info = clasificarSolicitud(solicitud);
+    const lat = Number(solicitud.lat);
+    const lng = Number(solicitud.lng);
+    let nombre = info.nombre && info.nombre !== 'Punto sobre la ruta' ? info.nombre : '';
+
+    const { data: viaje } = await window.db.from('viajes').select('id, ruta').eq('id', viajeId).maybeSingle();
+    const ruta = Array.isArray(viaje && viaje.ruta) ? viaje.ruta : [];
+    if (!nombre && isFinite(lat) && isFinite(lng)) {
+        let mejor = null;
+        let mejorDist = 81;
+        ruta.forEach((pt) => {
+            const plat = Number(pt && pt.lat);
+            const plng = Number(pt && pt.lng);
+            if (!isFinite(plat) || !isFinite(plng)) return;
+            const dist = distanciaMetros(plat, plng, lat, lng);
+            if (dist < mejorDist) {
+                mejorDist = dist;
+                mejor = pt;
+            }
+        });
+        if (mejor && mejor.nombre) nombre = mejor.nombre;
+    }
+
+    const coincide = (plat, plng, pnombre) => {
+        const porNombre = nombresParadaIguales(pnombre, nombre);
+        const dist = isFinite(Number(plat)) && isFinite(Number(plng)) && isFinite(lat) && isFinite(lng)
+            ? distanciaMetros(Number(plat), Number(plng), lat, lng)
+            : Infinity;
+        if (porNombre && dist <= 80) return true;
+        if (!nombre && dist <= 20) return true;
+        return false;
+    };
+
+    if (viaje) {
+        const rutaLimpia = ruta.filter((pt) => !coincide(pt && pt.lat, pt && pt.lng, pt && pt.nombre));
+        if (rutaLimpia.length !== ruta.length) {
+            await window.db.from('viajes').update({ ruta: rutaLimpia }).eq('id', viajeId);
+        }
+    }
+
+    const { data: filas } = await window.db.from('paradas').select('id, nombre, latitud, longitud').eq('viaje_id', viajeId);
+    const ids = (filas || []).filter((f) => coincide(f.latitud, f.longitud, f.nombre)).map((f) => f.id);
+    if (ids.length) await window.db.from('paradas').delete().in('id', ids);
+
+    const { data: gente } = await window.db.from('usuarios').select('id, parada_id').eq('viaje_id', viajeId).not('parada_id', 'is', null);
+    for (const persona of gente || []) {
+        const pid = String(persona.parada_id || '');
+        let quitar = ids.indexOf(pid) !== -1;
+        if (!quitar) {
+            try {
+                const datos = JSON.parse(pid);
+                quitar = coincide(datos.lat, datos.lng, datos.nombre);
+            } catch (e) { quitar = false; }
+        }
+        if (quitar) await window.db.from('usuarios').update({ parada_id: null }).eq('id', persona.id);
+    }
 }
 
 async function agregarParadaAprobadaAViaje(viajeId, paradaAprobada) {
@@ -396,7 +469,7 @@ async function agregarParadaAprobadaAViaje(viajeId, paradaAprobada) {
                         lat: Number(paradaAprobada.lat),
                         lng: Number(paradaAprobada.lng),
                         nombre: paradaAprobada.nombre || 'Parada aprobada',
-                        origen: 'ruta'
+                        origen: 'solicitud'
                     })
                 }]);
             }
@@ -410,7 +483,8 @@ async function agregarParadaAprobadaAViaje(viajeId, paradaAprobada) {
         const nuevaLista = insertarPuntoEnRuta(rutaActual, {
             lat: Number(paradaAprobada.lat),
             lng: Number(paradaAprobada.lng),
-            nombre: paradaAprobada.nombre || 'Parada aprobada'
+            nombre: paradaAprobada.nombre || 'Parada aprobada',
+            origen: 'solicitud'
         });
         if (nuevaLista.length !== rutaActual.length) {
             const rutaFinal = conModoGps(nuevaLista, modoGpsDe(viaje));
@@ -670,6 +744,9 @@ window.htmlAsientos = htmlAsientos;
 window.iniciarMenuLateral = iniciarMenuLateral;
 window.insertarPuntoEnRuta = insertarPuntoEnRuta;
 window.agregarParadaAprobadaAViaje = agregarParadaAprobadaAViaje;
+window.retirarParadaSolicitada = retirarParadaSolicitada;
+window.nombresParadaIguales = nombresParadaIguales;
+window.detalleDeParada = detalleDeParada;
 window.iniciarCanalAsientos = iniciarCanalAsientos;
 window.suscribirAsientosEnVivo = suscribirAsientosEnVivo;
 window.notificarCambioAsiento = notificarCambioAsiento;

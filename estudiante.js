@@ -466,14 +466,14 @@ async function anotarseViaje(viajeId) {
 async function cargarMiembros(transporteId) {
     const contenedor = document.getElementById('lista-miembros');
     contenedor.innerHTML = '';
-    const { data: usuarios } = await window.db.from('usuarios').select('nombre_completo, foto_perfil').eq('transporte_id', transporteId);
+    const { data: usuarios } = await window.db.from('usuarios').select('nombre_completo').eq('transporte_id', transporteId);
     
-    if(usuarios) {
+    if(usuarios && usuarios.length) {
         usuarios.forEach(u => {
-            const src = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
-            // Sin onclick para estudiantes (por privacidad)
-            contenedor.innerHTML += `<img src="${src}" title="${u.nombre_completo}" style="width:35px;height:35px;border-radius:50%;object-fit:cover;border:1px solid #cbd5e1;">`;
+            contenedor.innerHTML += `<span class="integrante-nombre">${escaparHtml(u.nombre_completo)}</span>`;
         });
+    } else {
+        contenedor.innerHTML = '<span class="text-muted">Nadie más está asignado a esta unidad.</span>';
     }
 }
 
@@ -482,9 +482,9 @@ async function cargarMiembrosGenerales(viajeId) {
     const contenedor = document.getElementById('lista-general');
     if(!contenedor) return;
     const { data: usuarios } = await window.db.from('usuarios')
-        .select('nombre_completo, foto_perfil, rol')
+        .select('nombre_completo, rol')
         .eq('viaje_id', viajeId)
-        .in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido']);
+        .in('estado_viaje', ['anotado', 'asignado', 'asiento_elegido', 'sin_respaldo']);
     
     const firma = (usuarios || []).map((u) => u.nombre_completo + '|' + (u.rol || '')).sort().join(';');
     if (firma === firmaListaGeneral && contenedor.childElementCount) return;
@@ -492,9 +492,8 @@ async function cargarMiembrosGenerales(viajeId) {
     contenedor.innerHTML = '';
     if(usuarios && usuarios.length > 0) {
         usuarios.forEach(u => {
-            const src = u.foto_perfil || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nombre_completo)}&background=random`;
-            const borderColor = u.rol === 'admin' ? 'var(--error)' : 'var(--accent)';
-            contenedor.innerHTML += `<img src="${src}" title="${u.nombre_completo} (${u.rol})" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid ${borderColor};">`;
+            const personal = u.rol === 'admin' || u.rol === 'superadmin' ? ' integrante-personal' : '';
+            contenedor.innerHTML += `<span class="integrante-nombre${personal}">${escaparHtml(u.nombre_completo)}</span>`;
         });
     } else {
         contenedor.innerHTML = '<span class="text-muted">Aún no hay nadie anotado.</span>';
@@ -758,22 +757,66 @@ function geometriaActiva() {
     return puntosDeRuta(ruta || []);
 }
 
+function paradaSigueAprobada(solicitud, lat, lng, nombre) {
+    if (!solicitud || String(solicitud.estado || '') !== 'aprobada') return false;
+    const info = clasificarSolicitud(solicitud);
+    if (nombresParadaIguales(info.nombre, nombre)) return true;
+    const slat = Number(solicitud.lat);
+    const slng = Number(solicitud.lng);
+    return isFinite(slat) && isFinite(slng) && isFinite(Number(lat)) && isFinite(Number(lng)) && distanciaMetros(slat, slng, Number(lat), Number(lng)) <= 80;
+}
+
 async function llenarSelectorParadas(puntos) {
     const selectParadas = document.getElementById('parada-select');
     if (!selectParadas) return;
-    const lista = puntosDeRuta(puntos);
+    let lista = puntosDeRuta(puntos);
     if (window.currentViajeId && window.db) {
         try {
-            const { data: extras } = await window.db.from('paradas').select('nombre, latitud, longitud').eq('viaje_id', window.currentViajeId);
+            const solRes = await window.db.from('paradas_intermitentes').select('lat, lng, estado').eq('viaje_id', window.currentViajeId);
+            const extRes = await window.db.from('paradas').select('id, nombre, latitud, longitud, detalle').eq('viaje_id', window.currentViajeId);
+            const solicitudes = solRes.error ? null : (solRes.data || []);
+            const extras = extRes.error ? [] : (extRes.data || []);
+            const huerfanas = solicitudes ? extras.filter((p) => {
+                const detalle = detalleDeParada(p.detalle);
+                if (detalle && detalle.origen === 'elegida') return false;
+                return !solicitudes.some((s) => paradaSigueAprobada(s, p.latitud, p.longitud, p.nombre));
+            }) : [];
+            if (huerfanas.length) {
+                const antes = lista.length;
+                lista = lista.filter((r, indice) => {
+                    if (indice === 0) return true;
+                    const sobra = huerfanas.some((p) => nombresParadaIguales(p.nombre, r.nombre) && distanciaMetros(Number(p.latitud), Number(p.longitud), Number(r.lat), Number(r.lng)) <= 80);
+                    return !sobra;
+                });
+                if (lista.length !== antes && window.currentViajeData) {
+                    await window.db.from('viajes').update({ ruta: lista }).eq('id', window.currentViajeId);
+                    window.currentViajeData.ruta = lista;
+                }
+                const ids = huerfanas.map((p) => p.id).filter(Boolean);
+                if (ids.length) {
+                    await window.db.from('paradas').delete().in('id', ids);
+                    const { data: gente } = await window.db.from('usuarios').select('id, parada_id').eq('viaje_id', window.currentViajeId).not('parada_id', 'is', null);
+                    for (const persona of gente || []) {
+                        const pid = String(persona.parada_id || '');
+                        let quitar = ids.indexOf(pid) !== -1;
+                        if (!quitar) {
+                            try {
+                                const datos = JSON.parse(pid);
+                                quitar = huerfanas.some((p) => nombresParadaIguales(p.nombre, datos.nombre));
+                            } catch (errJson) { quitar = false; }
+                        }
+                        if (quitar) await window.db.from('usuarios').update({ parada_id: null }).eq('id', persona.id);
+                    }
+                }
+            }
             (extras || []).forEach((p) => {
+                if (huerfanas.some((h) => h.id === p.id)) return;
                 const lat = Number(p.latitud);
                 const lng = Number(p.longitud);
                 if (!isFinite(lat) || !isFinite(lng)) return;
-                const ya = lista.some((r) => {
-                    const mismoNombre = r.nombre && p.nombre && r.nombre.trim().toLowerCase() === p.nombre.trim().toLowerCase();
-                    return mismoNombre || distanciaMetros(Number(r.lat), Number(r.lng), lat, lng) < 40;
-                });
-                if (!ya) lista.push({ lat: lat, lng: lng, nombre: p.nombre || 'Parada aprobada', origen: 'ruta' });
+                if (!(solicitudes || []).some((s) => paradaSigueAprobada(s, lat, lng, p.nombre))) return;
+                const ya = lista.some((r) => nombresParadaIguales(r.nombre, p.nombre) || distanciaMetros(Number(r.lat), Number(r.lng), lat, lng) < 40);
+                if (!ya) lista.push({ lat: lat, lng: lng, nombre: p.nombre || 'Parada aprobada', origen: 'solicitud' });
             });
         } catch (e) { /* la ruta del viaje sigue siendo la lista principal */ }
     }
@@ -890,7 +933,7 @@ async function guardarParada() {
                     nombre: datos.nombre || 'Parada',
                     latitud: datos.lat,
                     longitud: datos.lng,
-                    detalle: guardadoJson
+                    detalle: JSON.stringify(Object.assign({}, datos, { origen: 'elegida' }))
                 }]).select('id').single();
 
                 if (errInsert) {
