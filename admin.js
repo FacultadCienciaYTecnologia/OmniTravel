@@ -1,8 +1,5 @@
 // ====== VERIFICAR SESIÓN ======
-const session = JSON.parse(localStorage.getItem('omni_user'));
-if (!session || session.rol !== 'admin') {
-    window.location.href = 'index.html';
-}
+const session = OmniSession.requireRole('admin');
 vigilarMantenimiento();
 document.getElementById('admin-name').innerText = `Admin: ${session.nombre_completo}`;
 const profilePic = document.getElementById('nav-profile-pic');
@@ -11,7 +8,7 @@ if(profilePic) {
 }
 
 function logout() {
-    localStorage.removeItem('omni_user');
+    OmniSession.clear();
     window.location.href = 'index.html';
 }
 
@@ -31,7 +28,7 @@ async function loadAdminDashboard() {
         const { data: user, error } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
         if (error || !user) {
             // El usuario fue eliminado
-            localStorage.removeItem('omni_user');
+            OmniSession.clear();
             window.location.href = 'index.html';
             return;
         }
@@ -41,13 +38,13 @@ async function loadAdminDashboard() {
                 return;
             }
             if(user.rol !== 'admin') {
-                Object.assign(session, user);
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                Object.assign(session, OmniSession.verifyProfile(user));
+                OmniSession.update(session);
                 window.location.href = 'index.html';
                 return;
             }
-            Object.assign(session, user);
-            localStorage.setItem('omni_user', JSON.stringify(session));
+            Object.assign(session, OmniSession.verifyProfile(user));
+            OmniSession.update(session);
         }
         // Encontrar un transporte asignado a este viaje.
         const { data: viajes } = await window.db.from('viajes').select('id, titulo, estado, ruta').in('estado', ['preparacion', 'en_ruta', 'en_ruta_ida', 'espera_vuelta', 'en_ruta_vuelta']).limit(1);
@@ -117,7 +114,7 @@ async function loadAdminDashboard() {
             transporteIdActualTemp = adminUser.transporte_id;
             if (session.transporte_id !== transporteIdActualTemp) {
                 session.transporte_id = transporteIdActualTemp;
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
             }
         } else {
             // Failsafe por si el superadmin lo asignó pero no se actualizó su tabla usuarios
@@ -128,7 +125,7 @@ async function loadAdminDashboard() {
                 window.db.from('usuarios').update({ transporte_id: transporteIdActualTemp, viaje_id: viajeIdActual }).eq('id', session.id).then();
                 session.transporte_id = transporteIdActualTemp;
                 session.viaje_id = viajeIdActual;
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
             }
         }
 
@@ -203,7 +200,7 @@ async function loadAdminDashboard() {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
                     // Si el usuario fue eliminado
                     if (payload.eventType === 'DELETE' && payload.old && payload.old.id === session.id) {
-                        localStorage.removeItem('omni_user');
+                        OmniSession.clear();
                         Swal.fire('Cuenta Eliminada', 'Tu cuenta ya no está disponible. Serás redirigido.', 'error').then(() => {
                             window.location.href = 'index.html';
                         });
@@ -216,8 +213,8 @@ async function loadAdminDashboard() {
                             return;
                         }
                         if(payload.new.rol !== 'admin') {
-                            Object.assign(session, payload.new);
-                            localStorage.setItem('omni_user', JSON.stringify(session));
+                            Object.assign(session, OmniSession.verifyProfile(payload.new));
+                            OmniSession.update(session);
                             Swal.fire('Rol Modificado', 'Tu rol ha sido cambiado. Serás redirigido.', 'info').then(() => {
                                 window.location.href = 'index.html';
                             });
@@ -1098,7 +1095,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
                 try {
                     await window.db.from('usuarios').update({ asiento: null, fecha_reserva: null }).eq('id', session.id);
                     session.asiento = null;
-                    localStorage.setItem('omni_user', JSON.stringify(session));
+                    OmniSession.update(session);
                     Swal.fire('Liberado', 'Tu asiento VIP ha sido liberado.', 'success');
                     lastAdminOccupiedStr = "";
                     renderAdminCroquis();
@@ -1131,7 +1128,7 @@ function seleccionarAsientoVIP(numero, viajeId, transporteId) {
 
                 await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                 session.asiento = numero.toString();
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
                 Swal.fire('¡Éxito!', 'Asiento VIP asignado.', 'success');
                 lastAdminOccupiedStr = "";
                 renderAdminCroquis();

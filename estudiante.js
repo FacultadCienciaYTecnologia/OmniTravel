@@ -1,8 +1,5 @@
 // ====== VERIFICAR SESIÓN ======
-const session = JSON.parse(localStorage.getItem('omni_user'));
-if (!session || session.rol !== 'estudiante') {
-    window.location.href = 'index.html';
-}
+const session = OmniSession.requireRole('estudiante');
 vigilarMantenimiento();
 document.getElementById('user-name-display').innerText = `Hola, ${session.nombre_completo}`;
 const profilePic = document.getElementById('nav-profile-pic');
@@ -11,7 +8,7 @@ if(profilePic) {
 }
 
 function logout() {
-    localStorage.removeItem('omni_user');
+    OmniSession.clear();
     window.location.href = 'index.html';
 }
 
@@ -30,7 +27,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             const { data: user, error } = await window.db.from('usuarios').select('*').eq('id', session.id).single();
             if (error || !user) {
                 // El usuario fue eliminado
-                localStorage.removeItem('omni_user');
+                OmniSession.clear();
                 window.location.href = 'index.html';
                 return;
             }
@@ -40,13 +37,13 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     return;
                 }
                 if(user.rol !== 'estudiante') {
-                    Object.assign(session, user);
-                    localStorage.setItem('omni_user', JSON.stringify(session));
+                    Object.assign(session, OmniSession.verifyProfile(user));
+                    OmniSession.update(session);
                     window.location.href = 'index.html';
                     return;
                 }
-                Object.assign(session, user);
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                Object.assign(session, OmniSession.verifyProfile(user));
+                OmniSession.update(session);
             }
         }
 
@@ -188,7 +185,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             if (session.transporte_id && estado === 'anotado') {
                 estado = 'asignado';
                 session.estado_viaje = 'asignado';
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
                 window.db.from('usuarios').update({ estado_viaje: 'asignado' }).eq('id', session.id);
             }
 
@@ -348,7 +345,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
                     // Si el usuario fue eliminado
                     if (payload.eventType === 'DELETE' && payload.old && payload.old.id === session.id) {
-                        localStorage.removeItem('omni_user');
+                        OmniSession.clear();
                         Swal.fire('Cuenta Eliminada', 'Tu cuenta ya no está disponible. Serás redirigido.', 'error').then(() => {
                             window.location.href = 'index.html';
                         });
@@ -362,15 +359,15 @@ async function loadEstudianteDashboard(skipFetch = false) {
                             return;
                         }
                         if(payload.new.rol !== 'estudiante') {
-                            Object.assign(session, payload.new);
-                            localStorage.setItem('omni_user', JSON.stringify(session));
+                            Object.assign(session, OmniSession.verifyProfile(payload.new));
+                            OmniSession.update(session);
                             Swal.fire('Rol Modificado', 'Tu rol ha sido cambiado. Serás redirigido.', 'info').then(() => {
                                 window.location.href = 'index.html';
                             });
                             return;
                         }
-                        Object.assign(session, payload.new);
-                        localStorage.setItem('omni_user', JSON.stringify(session));
+                        Object.assign(session, OmniSession.verifyProfile(payload.new));
+                        OmniSession.update(session);
                         window.croquisRendered = false;
                         lastOccupiedStr = "";
                         loadEstudianteDashboard(true);
@@ -454,7 +451,7 @@ async function anotarseViaje(viajeId) {
                 session.estado_viaje = 'anotado';
                 session.transporte_id = null;
                 session.asiento = null;
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
                 
                 Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Anotado exitosamente', showConfirmButton: false, timer: 1500 });
                 loadEstudianteDashboard();
@@ -638,7 +635,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     if (error) throw error;
                     session.asiento = null;
                     session.estado_viaje = estadoLibre;
-                    localStorage.setItem('omni_user', JSON.stringify(session));
+                    OmniSession.update(session);
                     Swal.fire('Asiento liberado', 'Puede elegir otro dentro del horario.', 'success');
                     notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                     loadEstudianteDashboard(true);
@@ -686,7 +683,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     const { error } = await window.db.from('usuarios').update({ asiento: numero.toString(), fecha_reserva: new Date().toISOString() }).eq('id', session.id);
                     if (error) throw error;
                     session.asiento = numero.toString();
-                    localStorage.setItem('omni_user', JSON.stringify(session));
+                    OmniSession.update(session);
                     Swal.fire('¡Éxito!', 'Asiento cambiado.', 'success');
                     lastOccupiedStr = ""; // Forzar recargo
                     renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
@@ -738,7 +735,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                 
                 session.asiento = numero.toString();
                 session.estado_viaje = 'asiento_elegido';
-                localStorage.setItem('omni_user', JSON.stringify(session));
+                OmniSession.update(session);
                 
                 Swal.fire('Asiento reservado', 'Ahora indique la parada de subida.', 'success');
                 notificarCambioAsiento(window.currentViajeId, session.transporte_id);
@@ -914,7 +911,7 @@ async function guardarParada() {
 
         session.parada_id = paradaIdFinal;
         session.parada_detalle = datos;
-        localStorage.setItem('omni_user', JSON.stringify(session));
+        OmniSession.update(session);
 
         Swal.fire('Parada confirmada', datos.nombre || 'Parada registrada.', 'success');
         loadEstudianteDashboard(true);
@@ -1000,7 +997,7 @@ async function marcarAsistencia(abordo) {
             await window.db.from('usuarios').update({ abordo: true, asistencia_cancelada: false }).eq('id', session.id);
             session.abordo = true;
             session.asistencia_cancelada = false;
-            localStorage.setItem('omni_user', JSON.stringify(session));
+            OmniSession.update(session);
             Swal.fire({
                 icon: 'success',
                 title: '¡Asistencia Confirmada!',
@@ -1028,7 +1025,7 @@ async function marcarAsistencia(abordo) {
         try {
             await window.db.from('usuarios').update({ abordo: false }).eq('id', session.id);
             session.abordo = false;
-            localStorage.setItem('omni_user', JSON.stringify(session));
+            OmniSession.update(session);
             Swal.fire('Actualizado', 'Se indicó que aún no estás dentro de la unidad.', 'info');
             loadEstudianteDashboard();
         } catch(e) {

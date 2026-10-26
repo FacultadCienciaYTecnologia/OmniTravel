@@ -5,11 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OmniTravel - Admin Transporte</title>
     <link rel="stylesheet" href="style.css">
+    <script src="auth-session.js"></script>
     <script>
-        const s_admin = JSON.parse(localStorage.getItem('omni_user'));
-        if (!s_admin || s_admin.rol !== 'admin') {
-            window.location.replace('index.html');
-        }
+        OmniSession.requireRole('admin');
     </script>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
