@@ -1,5 +1,50 @@
 const MARGEN_RUTA_METROS = 50;
 
+const ZONA_HORARIA = 'America/El_Salvador';
+
+function aDatetimeLocal(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (isNaN(d.getTime())) return String(valor).slice(0, 16);
+    const partes = new Intl.DateTimeFormat('en-US', {
+        timeZone: ZONA_HORARIA,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+    }).formatToParts(d);
+    const tomar = (tipo) => {
+        const pieza = partes.find((p) => p.type === tipo);
+        return pieza ? pieza.value : '';
+    };
+    let hora = tomar('hour');
+    if (hora === '24') hora = '00';
+    return tomar('year') + '-' + tomar('month') + '-' + tomar('day') + 'T' + hora + ':' + tomar('minute');
+}
+
+function desdeDatetimeLocal(valor) {
+    const texto = String(valor || '').trim();
+    if (!texto) return texto;
+    if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(texto)) return texto;
+    return (texto.length === 16 ? texto + ':00' : texto) + '-06:00';
+}
+
+function textoFechaHora(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (isNaN(d.getTime())) return String(valor);
+    return d.toLocaleString('es-SV', {
+        timeZone: ZONA_HORARIA,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
 function plazasPorTipo(tipo) {
     if (tipo === 'bus_50') return 50;
     if (tipo === 'microbus_16' || tipo === 'microbus_15') return 18;
@@ -716,6 +761,9 @@ window.mostrarPantallaMantenimiento = mostrarPantallaMantenimiento;
 window.vigilarMantenimiento = vigilarMantenimiento;
 window.fijarMantenimiento = fijarMantenimiento;
 window.cerrarSesionNoAprobada = cerrarSesionNoAprobada;
+window.aDatetimeLocal = aDatetimeLocal;
+window.desdeDatetimeLocal = desdeDatetimeLocal;
+window.textoFechaHora = textoFechaHora;
 window.MARGEN_RUTA_METROS = MARGEN_RUTA_METROS;
 window.parejaDeAsiento = parejaDeAsiento;
 window.esAsientoSinRespaldo = esAsientoSinRespaldo;

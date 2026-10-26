@@ -68,7 +68,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     container.innerHTML += `
                         <div class="card text-center" style="border-top: 4px solid var(--accent);">
                             <h3 style="word-break: break-word;">${v.titulo}</h3>
-                            <p class="text-muted" style="margin-bottom:15px;">Salida: ${new Date(v.fecha_salida).toLocaleString()}</p>
+                            <p class="text-muted" style="margin-bottom:15px;">Salida: ${textoFechaHora(v.fecha_salida)}</p>
                             <button class="btn btn-success w-100" onclick="anotarseViaje('${v.id}')">Anotarme a este viaje</button>
                         </div>
                     `;
@@ -111,7 +111,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
             }
 
             document.getElementById('v-titulo').innerText = viaje.titulo;
-            document.getElementById('v-fecha').innerText = `Fecha de Salida: ${new Date(viaje.fecha_salida).toLocaleString()}`;
+            document.getElementById('v-fecha').innerText = `Fecha de Salida: ${textoFechaHora(viaje.fecha_salida)}`;
             cargarEvidencia();
             
             // Asistencia UI

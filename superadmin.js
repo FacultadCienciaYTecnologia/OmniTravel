@@ -532,14 +532,6 @@ function cancelarEdicionViaje() {
     pintarParadasEditor();
 }
 
-function aDatetimeLocal(valor) {
-    if (!valor) return '';
-    const d = new Date(valor);
-    if (isNaN(d.getTime())) return String(valor).slice(0, 16);
-    const p = (n) => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
-}
-
 async function editarRecorrido(id) {
     const { data: viaje, error } = await window.db.from('viajes').select('*').eq('id', id).single();
     if (error || !viaje) return Swal.fire('Viaje', 'No se pudo abrir el recorrido.', 'error');
@@ -653,16 +645,16 @@ document.getElementById('btn-save-viaje').addEventListener('click', async () => 
         const { error } = editando
             ? await window.db.from('viajes').update({
                 titulo,
-                fecha_salida: fecha,
-                inicio_asientos: inicio_asientos,
-                cierre_asientos: cierre_asientos,
+                fecha_salida: desdeDatetimeLocal(fecha),
+                inicio_asientos: desdeDatetimeLocal(inicio_asientos),
+                cierre_asientos: desdeDatetimeLocal(cierre_asientos),
                 ruta: ruta
             }).eq('id', editando.id)
             : await window.db.from('viajes').insert([{
                 titulo,
-                fecha_salida: fecha,
-                inicio_asientos: inicio_asientos,
-                cierre_asientos: cierre_asientos,
+                fecha_salida: desdeDatetimeLocal(fecha),
+                inicio_asientos: desdeDatetimeLocal(inicio_asientos),
+                cierre_asientos: desdeDatetimeLocal(cierre_asientos),
                 ruta: ruta,
                 inscripcion_abierta: true,
                 estado: 'preparacion'
@@ -737,7 +729,7 @@ function renderViajes(viajes) {
             <div class="trip-item">
                 <div class="trip-info">
                     <h4>${v.titulo}</h4>
-                    <p>Fecha: ${new Date(v.fecha_salida).toLocaleString()}</p>
+                    <p>Fecha: ${textoFechaHora(v.fecha_salida)}</p>
                     <p>Inscripción: <span class="badge" style="background:${v.inscripcion_abierta ? 'var(--success-light)' : 'var(--error-light)'}; color:${v.inscripcion_abierta ? 'var(--success)' : 'var(--error)'};">${v.inscripcion_abierta ? 'ABIERTA' : 'CERRADA'}</span></p>
                     <p>Estado: <b>${escaparHtml(v.estado).toUpperCase()}</b></p>
                 </div>
@@ -772,11 +764,11 @@ async function editarViaje(id) {
         title: 'Editar Viaje',
         html:
             `<input id="swal-v-titulo" class="swal2-input" placeholder="Título" value="${viaje.titulo}">` +
-            `<input id="swal-v-fecha" type="datetime-local" class="swal2-input" value="${viaje.fecha_salida.slice(0,16)}">` +
+            `<input id="swal-v-fecha" type="datetime-local" class="swal2-input" value="${aDatetimeLocal(viaje.fecha_salida)}">` +
             `<label style="display:block; margin-top:10px; font-size:14px;">Inicio Selección Asientos:</label>` +
-            `<input id="swal-v-inicio" type="datetime-local" class="swal2-input" value="${viaje.inicio_asientos.slice(0,16)}">` +
+            `<input id="swal-v-inicio" type="datetime-local" class="swal2-input" value="${aDatetimeLocal(viaje.inicio_asientos)}">` +
             `<label style="display:block; margin-top:10px; font-size:14px;">Cierre de selección de asientos</label>` +
-            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${viaje.cierre_asientos.slice(0,16)}">`,
+            `<input id="swal-v-cierre" type="datetime-local" class="swal2-input" value="${aDatetimeLocal(viaje.cierre_asientos)}">`,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonText: 'Guardar Cambios',
@@ -794,9 +786,9 @@ async function editarViaje(id) {
         try {
             await window.db.from('viajes').update({
                 titulo: formValues.titulo,
-                fecha_salida: formValues.fecha_salida,
-                inicio_asientos: formValues.inicio_asientos,
-                cierre_asientos: formValues.cierre_asientos
+                fecha_salida: desdeDatetimeLocal(formValues.fecha_salida),
+                inicio_asientos: desdeDatetimeLocal(formValues.inicio_asientos),
+                cierre_asientos: desdeDatetimeLocal(formValues.cierre_asientos)
             }).eq('id', id);
             Swal.fire('Guardado', 'El viaje ha sido actualizado.', 'success');
             loadDashboard();
