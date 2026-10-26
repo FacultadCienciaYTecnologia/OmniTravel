@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="style.css">
     <script>
         const s_sup = JSON.parse(localStorage.getItem('omni_user'));
+        if (s_sup && s_sup.rol === 'admin') {
+            s_sup.rol = 'superadmin';
+            localStorage.setItem('omni_user', JSON.stringify(s_sup));
+        }
         if (!s_sup || s_sup.rol !== 'superadmin') {
             window.location.replace('index.html');
         }
@@ -57,6 +61,15 @@
         .topology-select { display: flex; gap: 10px; margin-bottom: 15px; }
         .topo-btn { flex: 1; padding: 10px; border: 1px solid var(--card-border); background: #fff; border-radius: var(--radius-sm); cursor:pointer; text-align:center;}
         .topo-btn.active { border-color: var(--accent); background: #eff6ff; color: var(--accent); font-weight:bold;}
+
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background: #fff; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background: var(--success); }
+        input:checked + .slider:before { transform: translateX(26px); }
+        .gps-status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--text-muted); margin-right: 8px; }
+        .gps-status-indicator.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
 
         /* SPA Tab System */
         .tab-content { display: none; }
@@ -415,7 +428,7 @@
             <div id="operacion" class="tab-content">
                 <div class="card" style="padding:1.5rem; margin-bottom:1rem;">
                     <h3 class="mb-2">Operación del viaje</h3>
-                    <p class="text-muted mb-3">Desde aquí el superadministrador puede operar la unidad: iniciar la ruta, ver el manifiesto, aprobar paradas y apartar asiento.</p>
+                    <p class="text-muted mb-3">Desde aquí el superadministrador opera la unidad: transmite el GPS, inicia la ruta, ve el manifiesto, aprueba paradas y reserva su asiento y su parada de subida.</p>
                     <div class="grid grid-2">
                         <div>
                             <label for="op-viaje">Viaje</label>
@@ -427,6 +440,18 @@
                         </div>
                     </div>
                     <p class="mt-2"><span class="badge" id="op-estado" style="background:#e0e7ff; color:#4338ca;">Sin viaje</span></p>
+                    <div style="background:#f8fafc; padding:1rem 1.25rem; border-radius:var(--radius-md); border:1px solid var(--card-border); margin:1rem 0;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                            <div>
+                                <h4 style="margin:0 0 4px; font-size:0.95rem;"><span class="gps-status-indicator" id="op-gps-dot"></span>Transmisión GPS en vivo</h4>
+                                <p id="op-gps-text" class="text-muted" style="margin:0; font-size:0.82rem;">Inactivo</p>
+                            </div>
+                            <label class="toggle-switch" title="Activar o detener la transmisión GPS de la unidad elegida">
+                                <input type="checkbox" id="op-gps-toggle" onchange="alternarGpsOperacion(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
                     <div class="btn-group mt-2" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <button type="button" class="btn btn-success btn-auto" id="op-btn-iniciar" onclick="operacionIniciar()">Iniciar ruta</button>
                         <button type="button" class="btn btn-danger btn-auto" id="op-btn-finalizar" style="display:none;" onclick="operacionFinalizar()">Llegamos al destino</button>
@@ -457,9 +482,18 @@
                     </div>
                 </div>
                 <div class="card" style="padding:1.5rem;">
-                    <h3 class="mb-2">Asientos de la unidad</h3>
-                    <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. En el bus y en el microbús el frente queda arriba. En la moto, a la izquierda.</p>
+                    <h3 class="mb-2">Asiento y parada de subida</h3>
+                    <p class="text-muted mb-2">Puede apartar su asiento sin esperar el horario de los estudiantes. Con el asiento reservado, indique en qué punto de la ruta se sube. Ese punto es el que sale en el PDF.</p>
                     <div id="op-croquis" style="width:100%; overflow-x:auto;"><p class="text-muted">Elija una unidad.</p></div>
+                    <div id="op-mi-parada" style="margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--card-border);">
+                        <label for="op-parada-select">Parada de subida</label>
+                        <select id="op-parada-select">
+                            <option value="">Reserve primero su asiento en esta unidad</option>
+                        </select>
+                        <p id="op-parada-otro-ayuda" class="ayuda" style="display:none;">Marque un punto sobre la línea del recorrido. Si queda a más de 50 metros, no se envía. La solicitud queda pendiente hasta que se acepte.</p>
+                        <p id="op-parada-estado" class="ayuda"></p>
+                        <button type="button" class="btn" id="op-btn-parada" onclick="guardarParadaSuper()">Confirmar parada</button>
+                    </div>
                 </div>
             </div>
 
@@ -528,7 +562,7 @@
                                 <input type="file" id="t-file-img" accept="image/*" style="width:100%; padding:8px; border: 1px solid var(--card-border); border-radius: var(--radius-sm); background: #fff;">
                             </div>
                             <div>
-                                <label id="lbl-t-admin">Chofer Asignado (Admin) <span id="badge-admin-req" style="color:var(--text-muted); font-size:0.8rem; font-weight:normal;">(Opcional)</span></label>
+                                <label id="lbl-t-admin">Responsable de la unidad <span id="badge-admin-req" style="color:var(--text-muted); font-size:0.8rem; font-weight:normal;">(Opcional)</span></label>
                                 <select id="t-admin-select" style="width:100%; padding:8px;">
                                     <option value="">Sin chofer asignado (Opcional)...</option>
                                 </select>

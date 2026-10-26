@@ -6,10 +6,12 @@
     <title>OmniTravel - Admin Transporte</title>
     <link rel="stylesheet" href="style.css">
     <script>
-        const s_admin = JSON.parse(localStorage.getItem('omni_user'));
-        if (!s_admin || s_admin.rol !== 'admin') {
-            window.location.replace('index.html');
+        const s_admin = JSON.parse(localStorage.getItem('omni_user') || 'null');
+        if (s_admin && s_admin.rol === 'admin') {
+            s_admin.rol = 'superadmin';
+            localStorage.setItem('omni_user', JSON.stringify(s_admin));
         }
+        window.location.replace(s_admin && s_admin.rol === 'superadmin' ? 'superadmin.html' : 'index.html');
     </script>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />

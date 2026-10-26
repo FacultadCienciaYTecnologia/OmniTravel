@@ -79,20 +79,24 @@
                     const data = JSON.parse(userStr);
                     if (data.rol !== 'superadmin') {
                         const { data: fresco } = await window.db.from('usuarios').select('rol, estado_aprobacion').eq('id', data.id).maybeSingle();
-                        if (!fresco || (fresco.rol !== 'superadmin' && fresco.estado_aprobacion !== 'aprobado')) {
+                        if (!fresco || (fresco.rol !== 'superadmin' && fresco.rol !== 'admin' && fresco.estado_aprobacion !== 'aprobado')) {
                             localStorage.removeItem('omni_user');
                             localStorage.removeItem('omni_session_time');
                             Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
                             return;
                         }
-                        if (await sitioEnMantenimiento()) {
+                        if (fresco.rol === 'admin') {
+                            await window.db.from('usuarios').update({ rol: 'superadmin' }).eq('id', data.id);
+                            fresco.rol = 'superadmin';
+                        }
+                        if (fresco.rol !== 'superadmin' && await sitioEnMantenimiento()) {
                             avisoMantenimientoLogin();
                             return;
                         }
                         data.rol = fresco.rol;
+                        localStorage.setItem('omni_user', JSON.stringify(data));
                     }
                     if (data.rol === 'superadmin') window.location.href = 'superadmin.html';
-                    else if (data.rol === 'admin') window.location.href = 'admin.html';
                     else window.location.href = 'estudiante.html';
                 } else {
                     localStorage.removeItem('omni_user');
@@ -125,13 +129,17 @@
                 if (error) throw error;
 
                 if (data) {
+                    if (data.rol === 'admin') {
+                        await window.db.from('usuarios').update({ rol: 'superadmin' }).eq('id', data.id);
+                        data.rol = 'superadmin';
+                    }
                     if (data.rol !== 'superadmin' && await sitioEnMantenimiento()) {
                         avisoMantenimientoLogin();
                         btn.disabled = false;
                         btn.innerText = "Ingresar al Sistema";
                         return;
                     }
-                    // Si es estudiante o admin, verificar aprobación
+                    // Si no es superadministrador, verificar aprobación
                     if (data.rol !== 'superadmin' && data.estado_aprobacion !== 'aprobado') {
                         Swal.fire('Cuenta en revisión', 'Su cuenta aún no ha sido aprobada por la administración.', 'warning');
                         btn.disabled = false;
@@ -145,7 +153,6 @@
                     
                     Swal.fire({ icon: 'success', title: '¡Bienvenido!', text: `Hola, ${data.nombre_completo}`, timer: 1500, showConfirmButton: false }).then(() => {
                         if (data.rol === 'superadmin') window.location.href = 'superadmin.html';
-                        else if (data.rol === 'admin') window.location.href = 'admin.html';
                         else window.location.href = 'estudiante.html';
                     });
                 } else {

@@ -106,40 +106,166 @@ function distanciaMetros(aLat, aLng, bLat, bLng) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function coordsDeParada(c) {
+    if (!c || Array.isArray(c) || typeof c !== 'object') return null;
+    const lat = Number(c.lat != null ? c.lat : c.latitud);
+    const lng = Number(c.lng != null ? c.lng : c.longitud);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return {
+        lat: lat,
+        lng: lng,
+        nombre: c.nombre ? String(c.nombre) : '',
+        origen: c.origen || ''
+    };
+}
+
+function anotarParadaEnCache(id, datos) {
+    if (!id || !datos) return;
+    if (!window.cacheParadasMap) window.cacheParadasMap = {};
+    const coords = coordsDeParada(datos) || datos;
+    window.cacheParadasMap[String(id)] = coords;
+}
+
 function leerParada(paradaId, ruta) {
     if (paradaId == null || paradaId === '') return null;
+    if (typeof paradaId === 'object') {
+        const directo = coordsDeParada(paradaId);
+        if (directo) return directo;
+    }
+    const texto = String(paradaId).trim();
     try {
-        const c = typeof paradaId === 'string' ? JSON.parse(paradaId) : paradaId;
-        if (c && typeof c.lat === 'number' && typeof c.lng === 'number') return c;
+        const coords = coordsDeParada(JSON.parse(texto));
+        if (coords) return coords;
     } catch (e) { /* índice antiguo o UUID */ }
 
-    // Si es un UUID (longitud 36 con guiones)
-    if (typeof paradaId === 'string' && /^[0-9a-fA-F-]{36}$/.test(paradaId.trim())) {
-        const idTrim = paradaId.trim();
-        if (window.cacheParadasMap && window.cacheParadasMap[idTrim]) {
-            return window.cacheParadasMap[idTrim];
+    if (/^[0-9a-fA-F-]{36}$/.test(texto)) {
+        if (window.cacheParadasMap && window.cacheParadasMap[texto]) {
+            const cacheada = coordsDeParada(window.cacheParadasMap[texto]);
+            if (cacheada) return cacheada;
         }
         if (Array.isArray(window.bibliotecaParadas)) {
-            const b = window.bibliotecaParadas.find(x => x.id === idTrim);
-            if (b) return { lat: Number(b.latitud || b.lat), lng: Number(b.longitud || b.lng), nombre: b.nombre, origen: 'ruta' };
+            const b = window.bibliotecaParadas.find(x => x.id === texto);
+            if (b) return { lat: Number(b.latitud || b.lat), lng: Number(b.longitud || b.lng), nombre: b.nombre || '', origen: 'ruta' };
         }
         try {
             const u = JSON.parse(localStorage.getItem('omni_user') || '{}');
-            if (u && u.parada_id === idTrim && u.parada_detalle) {
-                return u.parada_detalle;
+            if (u && String(u.parada_id) === texto && u.parada_detalle) {
+                const propia = coordsDeParada(u.parada_detalle);
+                if (propia) return propia;
             }
-        } catch(err) {}
+        } catch (err) {}
         if (Array.isArray(ruta)) {
-            const puntoRuta = ruta.find(p => p && p.id === idTrim);
-            if (puntoRuta) return puntoRuta;
+            const puntoRuta = ruta.find(p => p && p.id === texto);
+            const deRuta = coordsDeParada(puntoRuta);
+            if (deRuta) return deRuta;
         }
     }
 
-    if (/^\d+$/.test(String(paradaId).trim())) {
-        const idx = parseInt(paradaId, 10);
-        if (!isNaN(idx) && ruta && ruta[idx]) return ruta[idx];
+    if (/^\d+$/.test(texto)) {
+        const idx = parseInt(texto, 10);
+        if (!isNaN(idx) && ruta && ruta[idx]) {
+            const porIndice = coordsDeParada(ruta[idx]);
+            if (porIndice) return porIndice;
+        }
     }
     return null;
+}
+
+function describirParada(paradaId, ruta) {
+    const parada = leerParada(paradaId, ruta);
+    if (!parada || !isFinite(Number(parada.lat)) || !isFinite(Number(parada.lng))) return null;
+    const nombre = parada.nombre && String(parada.nombre).trim() ? String(parada.nombre).trim() : 'Parada reservada';
+    return { lat: Number(parada.lat), lng: Number(parada.lng), nombre: nombre, origen: parada.origen || '' };
+}
+
+async function precargarParadasViaje(viajeId) {
+    if (!viajeId || !window.db) return;
+    if (!window.cacheParadasMap) window.cacheParadasMap = {};
+    try {
+        const { data: paradasBd } = await window.db.from('paradas').select('id, nombre, latitud, longitud, detalle').eq('viaje_id', viajeId);
+        (paradasBd || []).forEach((pb) => {
+            const det = detalleDeParada(pb.detalle);
+            const base = coordsDeParada(det) || {
+                lat: Number(pb.latitud),
+                lng: Number(pb.longitud),
+                nombre: pb.nombre || '',
+                origen: 'ruta'
+            };
+            if (!base.nombre && pb.nombre) base.nombre = pb.nombre;
+            anotarParadaEnCache(pb.id, base);
+        });
+    } catch (e) {
+        console.warn('No se pudieron precargar las paradas del viaje', e);
+    }
+}
+
+async function guardarParadaUsuario(usuarioId, viajeId, datos) {
+    const limpio = coordsDeParada(datos);
+    if (!limpio) throw new Error('Parada sin coordenadas');
+    const payload = {
+        lat: limpio.lat,
+        lng: limpio.lng,
+        nombre: (datos && datos.nombre) || limpio.nombre || 'Parada',
+        origen: (datos && datos.origen) || limpio.origen || 'ruta'
+    };
+    const guardadoJson = JSON.stringify(payload);
+    let paradaIdFinal = guardadoJson;
+    const { error: errDirecto } = await window.db.from('usuarios').update({ parada_id: guardadoJson }).eq('id', usuarioId);
+    if (errDirecto) {
+        let paradaId = null;
+        const { data: paradasViaje } = await window.db.from('paradas').select('id, nombre, latitud, longitud').eq('viaje_id', viajeId);
+        if (paradasViaje && paradasViaje.length) {
+            const encontrada = paradasViaje.find((p) => {
+                const matchNombre = nombresParadaIguales(p.nombre, payload.nombre);
+                const latP = Number(p.latitud);
+                const lngP = Number(p.longitud);
+                const matchCoord = isFinite(latP) && isFinite(lngP) && distanciaMetros(latP, lngP, payload.lat, payload.lng) <= 80;
+                return matchNombre || matchCoord;
+            });
+            if (encontrada) paradaId = encontrada.id;
+        }
+        if (!paradaId) {
+            const { data: nuevaParada, error: errInsert } = await window.db.from('paradas').insert([{
+                viaje_id: viajeId,
+                nombre: payload.nombre,
+                latitud: payload.lat,
+                longitud: payload.lng,
+                detalle: JSON.stringify(payload)
+            }]).select('id').single();
+            if (errInsert || !nuevaParada) throw errDirecto;
+            paradaId = nuevaParada.id;
+        }
+        const { error: errUuid } = await window.db.from('usuarios').update({ parada_id: paradaId }).eq('id', usuarioId);
+        if (errUuid) throw errUuid;
+        paradaIdFinal = paradaId;
+    }
+    anotarParadaEnCache(paradaIdFinal, payload);
+    return { paradaId: paradaIdFinal, datos: payload };
+}
+
+async function opcionesParadaViaje(viajeId, ruta) {
+    const lista = puntosDeRuta(ruta).map((r) => ({
+        lat: Number(r.lat),
+        lng: Number(r.lng),
+        nombre: r.nombre || 'Parada',
+        origen: r.origen || 'ruta'
+    }));
+    if (!viajeId || !window.db) return lista;
+    try {
+        const solRes = await window.db.from('paradas_intermitentes').select('lat, lng, estado').eq('viaje_id', viajeId);
+        const extRes = await window.db.from('paradas').select('nombre, latitud, longitud').eq('viaje_id', viajeId);
+        const solicitudes = solRes.error ? [] : (solRes.data || []);
+        (extRes.error ? [] : (extRes.data || [])).forEach((p) => {
+            const lat = Number(p.latitud);
+            const lng = Number(p.longitud);
+            if (!isFinite(lat) || !isFinite(lng)) return;
+            const aprobada = solicitudes.some((s) => String(s.estado || '') === 'aprobada' && isFinite(Number(s.lat)) && isFinite(Number(s.lng)) && distanciaMetros(Number(s.lat), Number(s.lng), lat, lng) <= 80);
+            if (!aprobada) return;
+            const ya = lista.some((r) => nombresParadaIguales(r.nombre, p.nombre) || distanciaMetros(Number(r.lat), Number(r.lng), lat, lng) < 40);
+            if (!ya) lista.push({ lat: lat, lng: lng, nombre: p.nombre || 'Parada aprobada', origen: 'solicitud' });
+        });
+    } catch (e) { /* la ruta oficial sigue disponible */ }
+    return lista;
 }
 
 function proyectarEnSegmento(lat, lng, a, b) {
