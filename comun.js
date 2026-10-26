@@ -79,7 +79,7 @@ function leerParada(paradaId, ruta) {
             if (b) return { lat: Number(b.latitud || b.lat), lng: Number(b.longitud || b.lng), nombre: b.nombre, origen: 'ruta' };
         }
         try {
-            const u = (OmniSession.read() || {});
+            const u = JSON.parse(localStorage.getItem('omni_user') || '{}');
             if (u && u.parada_id === idTrim && u.parada_detalle) {
                 return u.parada_detalle;
             }
@@ -610,29 +610,30 @@ function vigilarMantenimiento() {
 }
 
 async function fijarMantenimiento(activo) {
-    const sesion = (OmniSession.read() || {});
+    const sesion = JSON.parse(localStorage.getItem('omni_user') || '{}');
     if (!sesion.id) return { ok: false };
     if (activo) {
         const { data: actual } = await window.db.from('usuarios').select('departamento').eq('id', sesion.id).maybeSingle();
         if (actual && actual.departamento !== MARCA_MANTENIMIENTO) {
-            sessionStorage.setItem('omni_depto_previo', actual.departamento || '');
+            localStorage.setItem('omni_depto_previo', actual.departamento || '');
         }
         const { error } = await window.db.from('usuarios').update({ departamento: MARCA_MANTENIMIENTO }).eq('id', sesion.id);
         return { ok: !error };
     }
-    const previo = sessionStorage.getItem('omni_depto_previo') || null;
+    const previo = localStorage.getItem('omni_depto_previo') || null;
     const { data: marcados } = await window.db.from('usuarios').select('id').eq('departamento', MARCA_MANTENIMIENTO);
     for (const fila of marcados || []) {
         const valor = fila.id === sesion.id ? previo : null;
         const { error } = await window.db.from('usuarios').update({ departamento: valor }).eq('id', fila.id);
         if (error) return { ok: false };
     }
-    sessionStorage.removeItem('omni_depto_previo');
+    localStorage.removeItem('omni_depto_previo');
     return { ok: true };
 }
 
 function cerrarSesionNoAprobada() {
-    OmniSession.clear();
+    localStorage.removeItem('omni_user');
+    localStorage.removeItem('omni_session_time');
     window.location.replace('index.html');
 }
 
