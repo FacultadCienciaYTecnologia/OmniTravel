@@ -86,7 +86,10 @@ async function loadEstudianteDashboard(skipFetch = false) {
             if (!viaje) return; // Viaje fue eliminado
 
             window.currentViajeId = viaje.id;
-            window.currentViajeData = viaje; // Guardar datos para validaciones GPS
+            window.currentViajeData = viaje;
+            window.inicioAsientosMs = new Date(viaje.inicio_asientos).getTime();
+            window.cierreAsientosMs = new Date(viaje.cierre_asientos).getTime();
+            if (!horarioAsientosAbierto()) ocultarCroquisCerrado();
 
             await precargarParadasViaje(viaje.id);
 
@@ -190,16 +193,20 @@ async function loadEstudianteDashboard(skipFetch = false) {
 
                 const inicio = new Date(viaje.inicio_asientos).getTime();
                 const cierre = new Date(viaje.cierre_asientos).getTime();
+                window.inicioAsientosMs = inicio;
+                window.cierreAsientosMs = cierre;
                 const timerDiv = document.getElementById('seat-timer-container');
                 const croquisDiv = document.getElementById('croquis');
+                if (faseAsientos() !== 'abierto') ocultarCroquisCerrado(croquisDiv);
                 
                 if(window.seatTimerInterval) clearInterval(window.seatTimerInterval);
                 
                 function updateSeatTimer() {
-                    const now = new Date().getTime();
+                    const fase = faseAsientos();
+                    window.seleccionAsientosAbierta = fase === 'abierto';
+                    const now = Date.now();
                     
-                    if (now < inicio) {
-                        window.seleccionAsientosAbierta = false;
+                    if (fase === 'espera') {
                         window.croquisRendered = false;
                         const diff = inicio - now;
                         const d = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -214,14 +221,13 @@ async function loadEstudianteDashboard(skipFetch = false) {
                             ? '<strong>Paso actual: asiento sin respaldar</strong><p>Le corresponden solo los asientos ' + textoAsientosSinRespaldo() + '. No tienen respaldar: son para sentarse.</p>'
                             : '<strong>Paso actual: espera de asientos</strong><p>Ya tiene transporte. Podrá elegir asiento cuando abra el horario indicado arriba.</p>';
                     }
-                    else if (now >= inicio && now <= cierre) {
+                    else if (fase === 'abierto') {
                         const diff = cierre - now;
                         const d = Math.floor(diff / (1000 * 60 * 60 * 24));
                         const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                         const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
                         const s = Math.floor((diff % (1000 * 60)) / 1000);
                         
-                        window.seleccionAsientosAbierta = true;
                         mostrarCroquisAbierto(croquisDiv);
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-ok';
@@ -236,7 +242,6 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         }
                     } 
                     else {
-                        window.seleccionAsientosAbierta = false;
                         window.croquisRendered = false;
                         timerDiv.style.display = 'block';
                         timerDiv.className = 'aviso aviso-cerrado';
@@ -350,7 +355,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                         loadEstudianteDashboard(true);
                     }  
                     // Si alguien más tomó asiento o el admin asignó a alguien
-                    else if(window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id) {
+                    else if(horarioAsientosAbierto() && window.currentViajeId && session.transporte_id) {
                         window.croquisRendered = false;
                         lastOccupiedStr = "";
                         renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
@@ -388,14 +393,15 @@ async function loadEstudianteDashboard(skipFetch = false) {
             if (!window.subAsientosRegistradaEstudiante) {
                 window.subAsientosRegistradaEstudiante = true;
                 suscribirAsientosEnVivo(() => {
-                    if (window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id) {
+                    if (horarioAsientosAbierto() && window.currentViajeId && session.transporte_id) {
                         debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
                 });
 
                 if (window.croquisInterval) clearInterval(window.croquisInterval);
                 window.croquisInterval = setInterval(() => {
-                    if (window.seleccionAsientosAbierta && window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
+                    if (!horarioAsientosAbierto()) return;
+                    if (window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
                         debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
                 }, 3500);
@@ -478,20 +484,44 @@ let croquisInterval = null;
 let lastOccupiedStr = "";
 
 let debouncedCroquisTimer = null;
+function faseAsientos() {
+    const inicio = Number(window.inicioAsientosMs);
+    const cierre = Number(window.cierreAsientosMs);
+    if (!isFinite(inicio) || !isFinite(cierre)) return 'cerrado';
+    const now = Date.now();
+    if (now < inicio) return 'espera';
+    if (now > cierre) return 'cerrado';
+    return 'abierto';
+}
+
+function horarioAsientosAbierto() {
+    const abierto = faseAsientos() === 'abierto';
+    window.seleccionAsientosAbierta = abierto;
+    return abierto;
+}
+
 function leyendaCroquis() {
     const card = document.getElementById('card-croquis-asientos');
     return card ? card.querySelector('.legend') : null;
 }
 
 function ocultarCroquisCerrado(croquisDiv) {
+    window.croquisGeneracion = (window.croquisGeneracion || 0) + 1;
+    window.seleccionAsientosAbierta = false;
     const caja = croquisDiv || document.getElementById('croquis');
-    if (caja) {
+    if (caja && caja.style.display !== 'none') {
         caja.style.display = 'none';
+        caja.innerHTML = '';
+    } else if (caja && caja.innerHTML) {
         caja.innerHTML = '';
     }
     const leyenda = leyendaCroquis();
     if (leyenda) leyenda.style.display = 'none';
     lastOccupiedStr = '';
+    if (debouncedCroquisTimer) {
+        clearTimeout(debouncedCroquisTimer);
+        debouncedCroquisTimer = null;
+    }
 }
 
 function mostrarCroquisAbierto(croquisDiv) {
@@ -502,25 +532,36 @@ function mostrarCroquisAbierto(croquisDiv) {
 }
 
 function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
-    if (!window.seleccionAsientosAbierta) return;
+    if (!horarioAsientosAbierto()) return;
     if (debouncedCroquisTimer) clearTimeout(debouncedCroquisTimer);
     debouncedCroquisTimer = setTimeout(() => {
-        if (!window.seleccionAsientosAbierta) return;
+        if (!horarioAsientosAbierto()) return;
         if (forzar) lastOccupiedStr = "";
         renderCroquisEstudiante(viajeId, transporteId);
     }, 250);
 }
 
 async function renderCroquisEstudiante(viajeId, transporteId) {
-    if (!window.seleccionAsientosAbierta) return;
+    if (!horarioAsientosAbierto()) {
+        ocultarCroquisCerrado();
+        return;
+    }
+    const generacion = window.croquisGeneracion || 0;
     const croquisDiv = document.getElementById('croquis');
     if (!croquisDiv) return;
-    mostrarCroquisAbierto(croquisDiv);
     
     const { data: t } = await window.db.from('transportes').select('tipo').eq('id', transporteId).single();
+    if (generacion !== (window.croquisGeneracion || 0) || !horarioAsientosAbierto()) {
+        ocultarCroquisCerrado(croquisDiv);
+        return;
+    }
     if(!t) return;
     
     const { data: usuarios } = await window.db.from('usuarios').select('asiento, nombre_completo, rol').eq('transporte_id', transporteId).not('asiento', 'is', null);
+    if (generacion !== (window.croquisGeneracion || 0) || !horarioAsientosAbierto()) {
+        ocultarCroquisCerrado(croquisDiv);
+        return;
+    }
     const asientosOcupadosInfo = {};
     const asientosOcupados = asientosOcupadosInfo;
     
@@ -538,6 +579,11 @@ async function renderCroquisEstudiante(viajeId, transporteId) {
         usuarios.forEach(u => { asientosOcupadosInfo[u.asiento] = u; }); window.asientosOcupadosEstudiante = asientosOcupadosInfo;
     }
 
+    if (generacion !== (window.croquisGeneracion || 0) || !horarioAsientosAbierto()) {
+        ocultarCroquisCerrado(croquisDiv);
+        return;
+    }
+    mostrarCroquisAbierto(croquisDiv);
     const miAsiento = session.asiento && String(session.asiento).startsWith('Parado') ? null : session.asiento;
     const standingBanner = '';
 
@@ -615,7 +661,7 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
     if (micro && !designadoSinRespaldo() && esAsientoBanco(numero)) {
         return Swal.fire('No disponible', 'Los asientos ' + textoAsientosSinRespaldo() + ' no tienen respaldar y están reservados para las dos personas designadas. Elija otro asiento.', 'info');
     }
-    if (!window.seleccionAsientosAbierta) {
+    if (!horarioAsientosAbierto()) {
         return Swal.fire('Fuera de horario', 'La selección de asientos no está abierta.', 'info');
     }
     if (seatElement.classList.contains('occupied-blue') || seatElement.classList.contains('occupied-red')) {
