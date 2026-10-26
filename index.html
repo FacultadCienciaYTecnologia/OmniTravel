@@ -7,13 +7,10 @@
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- Face API -->
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <!-- CryptoJS para cifrar contraseñas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     
     <style>
-        #login-face { display: none; }
         body { background: var(--paper); }
     </style>
 </head>
@@ -30,16 +27,10 @@
                 </svg>
                 <span class="kicker">Transporte institucional</span>
                 <h1 style="font-size:1.8rem;">OmniTravel</h1>
-                <p>Ingrese con su correo o documento. Face ID solo está disponible si registró su rostro y su cuenta ya fue aprobada.</p>
+                <p>Ingrese con su correo o documento y su contraseña.</p>
             </div>
 
-            <!-- Tabs para modo de login -->
-            <div class="login-modes">
-                <button class="login-mode-btn active" onclick="switchLogin('email')">Contraseña</button>
-                <button class="login-mode-btn" onclick="switchLogin('face')">Face ID</button>
-            </div>
-
-            <!-- Login por Email -->
+            <!-- Login por correo y contraseña -->
             <form id="login-email">
                 <label>Correo Electrónico o Documento de Identificación</label>
                 <input type="text" id="email" placeholder="ejemplo@gmail.com" required>
@@ -50,18 +41,6 @@
                 <button type="submit" id="btn-login-email" class="btn mt-2">Ingresar al Sistema</button>
             </form>
 
-            <!-- Login por Face ID -->
-            <div id="login-face" class="text-center">
-                <p class="text-muted mb-2 text-sm">Ubica tu rostro en el centro para iniciar sesión.</p>
-                <div class="face-scanner mb-2">
-                    <video id="video-login" autoplay muted playsinline webkit-playsinline></video>
-                    <div class="face-overlay" id="overlay-login"></div>
-                    <canvas id="canvas-overlay"></canvas>
-                </div>
-                <button type="button" class="btn btn-outline" id="btn-start-face" onclick="startFaceLogin()">Activar Face ID</button>
-                <p id="face-status" class="mt-2" style="font-weight: 600; color: var(--text-main); font-size: 0.9rem;"></p>
-            </div>
-            
             <div class="text-center mt-3">
                 <p style="font-size:0.9rem; color:var(--text-muted);">¿No estás registrado? <a href="registro.html" style="color:var(--accent); font-weight:700; text-decoration:none;">Crear cuenta aquí</a></p>
             </div>
@@ -122,25 +101,7 @@
             }
         });
 
-        // Lógica visual de las pestañas
-        function switchLogin(mode) {
-            document.querySelectorAll('.login-mode-btn').forEach(btn => btn.classList.remove('active'));
-            if(mode === 'email') {
-                document.querySelector('.login-mode-btn:nth-child(1)').classList.add('active');
-                document.getElementById('login-email').style.display = 'flex';
-                document.getElementById('login-face').style.display = 'none';
-                stopCamera();
-            } else {
-                document.querySelector('.login-mode-btn:nth-child(2)').classList.add('active');
-                document.getElementById('login-email').style.display = 'none';
-                document.getElementById('login-face').style.display = 'block';
-                // Precargar modelos y descriptores biométricos inmediatamente al abrir la pestaña
-                if (typeof loadFaceModels === 'function') loadFaceModels();
-                if (typeof prefetchFaceData === 'function') prefetchFaceData();
-            }
-        }
-
-        // ====== LOGIN POR EMAIL ======
+        // ====== LOGIN POR CORREO Y CONTRASEÑA ======
         document.getElementById('login-email').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('btn-login-email');
