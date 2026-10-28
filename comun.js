@@ -851,7 +851,7 @@ function vigilarMantenimiento() {
         } catch (e) {}
     };
     revisar();
-    setInterval(revisar, 8000);
+    setInterval(revisar, 60000);
 }
 
 async function fijarMantenimiento(activo) {

@@ -363,9 +363,10 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     }  
                     // Si alguien más tomó asiento o el admin asignó a alguien
                     else if(horarioAsientosAbierto() && window.currentViajeId && session.transporte_id) {
-                        window.croquisRendered = false;
-                        lastOccupiedStr = "";
-                        renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
+                        const row = payload.new || payload.old;
+                        if (!row || !row.transporte_id || row.transporte_id === session.transporte_id) {
+                            debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
+                        }
                     }
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'viajes' }, () => {
@@ -399,9 +400,11 @@ async function loadEstudianteDashboard(skipFetch = false) {
 
             if (!window.subAsientosRegistradaEstudiante) {
                 window.subAsientosRegistradaEstudiante = true;
-                suscribirAsientosEnVivo(() => {
+                suscribirAsientosEnVivo((info) => {
                     if (horarioAsientosAbierto() && window.currentViajeId && session.transporte_id) {
-                        debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
+                        if (!info || !info.transporteId || info.transporteId === session.transporte_id) {
+                            debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
+                        }
                     }
                 });
 
@@ -411,7 +414,7 @@ async function loadEstudianteDashboard(skipFetch = false) {
                     if (window.currentViajeId && session.transporte_id && document.getElementById('panel-croquis') && document.getElementById('panel-croquis').style.display !== 'none') {
                         debouncedCroquisEstudiante(window.currentViajeId, session.transporte_id, false);
                     }
-                }, 3500);
+                }, 20000 + Math.floor(Math.random() * 8000));
             }
         }
 
@@ -547,11 +550,13 @@ function croquisPermitido(soloLectura) {
 function debouncedCroquisEstudiante(viajeId, transporteId, forzar = false) {
     if (!horarioAsientosAbierto()) return;
     if (debouncedCroquisTimer) clearTimeout(debouncedCroquisTimer);
+    const delay = forzar ? 150 : 300 + Math.floor(Math.random() * 800);
     debouncedCroquisTimer = setTimeout(() => {
+        debouncedCroquisTimer = null;
         if (!horarioAsientosAbierto()) return;
         if (forzar) lastOccupiedStr = "";
         renderCroquisEstudiante(viajeId, transporteId);
-    }, 250);
+    }, delay);
 }
 
 async function renderCroquisEstudiante(viajeId, transporteId, soloLectura) {
@@ -563,7 +568,15 @@ async function renderCroquisEstudiante(viajeId, transporteId, soloLectura) {
     const croquisDiv = document.getElementById('croquis');
     if (!croquisDiv) return;
     
-    const { data: t } = await window.db.from('transportes').select('tipo').eq('id', transporteId).single();
+    window._cacheTransportes = window._cacheTransportes || {};
+    let t = window._cacheTransportes[transporteId];
+    if (!t) {
+        const { data } = await window.db.from('transportes').select('tipo').eq('id', transporteId).maybeSingle();
+        if (data) {
+            window._cacheTransportes[transporteId] = data;
+            t = data;
+        }
+    }
     if (generacion !== (window.croquisGeneracion || 0) || !croquisPermitido(soloLectura)) {
         if (faseAsientos() === 'espera') ocultarCroquisCerrado(croquisDiv);
         return;
@@ -772,7 +785,11 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                     renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
                     notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                 } catch(e) {
-                    Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error');
+                    console.error('Error al cambiar asiento:', e);
+                    const msg = (e && (e.message || '').toLowerCase().includes('fetch'))
+                        ? 'La red estuvo lenta o saturada. Verifique si su asiento se actualizó o reintente.'
+                        : 'Ese asiento acaba de ser tomado o hubo un problema de conexión.';
+                    Swal.fire('Aviso', msg, 'info');
                     lastOccupiedStr = ""; 
                     renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
                 }
@@ -824,7 +841,11 @@ function selectSeat(seatElement, numero, ocupanteNombre) {
                 notificarCambioAsiento(window.currentViajeId, session.transporte_id);
                 loadEstudianteDashboard(true);
             } catch(e) { 
-                Swal.fire('Error', 'Ese asiento acaba de ser tomado por otra persona.', 'error'); 
+                console.error('Error al reservar asiento:', e);
+                const msg = (e && (e.message || '').toLowerCase().includes('fetch'))
+                    ? 'La red estuvo lenta o saturada. Verifique si su asiento se reservó o reintente.'
+                    : 'Ese asiento acaba de ser tomado o hubo un problema de conexión.';
+                Swal.fire('Aviso', msg, 'info'); 
                 lastOccupiedStr = ""; 
                 renderCroquisEstudiante(window.currentViajeId, session.transporte_id);
             }
@@ -863,32 +884,11 @@ async function llenarSelectorParadas(puntos) {
                 return !solicitudes.some((s) => paradaSigueAprobada(s, p.latitud, p.longitud, p.nombre));
             }) : [];
             if (huerfanas.length) {
-                const antes = lista.length;
                 lista = lista.filter((r, indice) => {
                     if (indice === 0) return true;
                     const sobra = huerfanas.some((p) => nombresParadaIguales(p.nombre, r.nombre) && distanciaMetros(Number(p.latitud), Number(p.longitud), Number(r.lat), Number(r.lng)) <= 80);
                     return !sobra;
                 });
-                if (lista.length !== antes && window.currentViajeData) {
-                    await window.db.from('viajes').update({ ruta: lista }).eq('id', window.currentViajeId);
-                    window.currentViajeData.ruta = lista;
-                }
-                const ids = huerfanas.map((p) => p.id).filter(Boolean);
-                if (ids.length) {
-                    await window.db.from('paradas').delete().in('id', ids);
-                    const { data: gente } = await window.db.from('usuarios').select('id, parada_id').eq('viaje_id', window.currentViajeId).not('parada_id', 'is', null);
-                    for (const persona of gente || []) {
-                        const pid = String(persona.parada_id || '');
-                        let quitar = ids.indexOf(pid) !== -1;
-                        if (!quitar) {
-                            try {
-                                const datos = JSON.parse(pid);
-                                quitar = huerfanas.some((p) => nombresParadaIguales(p.nombre, datos.nombre));
-                            } catch (errJson) { quitar = false; }
-                        }
-                        if (quitar) await window.db.from('usuarios').update({ parada_id: null }).eq('id', persona.id);
-                    }
-                }
             }
             (extras || []).forEach((p) => {
                 if (huerfanas.some((h) => h.id === p.id)) return;
